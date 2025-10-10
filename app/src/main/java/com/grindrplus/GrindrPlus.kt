@@ -13,7 +13,7 @@ import android.os.Looper
 import android.widget.Toast
 import com.grindrplus.bridge.BridgeClient
 import com.grindrplus.core.Config
-import com.grindrplus.core.DatabaseManager
+import com.grindrplus.hooks.DatabaseMonitor
 import com.grindrplus.core.EventManager
 import com.grindrplus.core.HttpBodyLogger
 import com.grindrplus.core.HttpLogger
@@ -137,7 +137,7 @@ object GrindrPlus {
 
         this.context = application
         this.bridgeClient = BridgeClient(context)
-        DatabaseManager.initializeDatabaseIfNeeded(context)
+
         Logger.initialize(context, bridgeClient, true)
 
         Logger.i("Initializing GrindrPlus...", LogSource.MODULE)

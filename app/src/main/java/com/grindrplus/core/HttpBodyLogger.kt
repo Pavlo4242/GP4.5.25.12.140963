@@ -1,20 +1,15 @@
 package com.grindrplus.core
 
 import android.annotation.SuppressLint
-import android.content.ContentValues
-import android.database.sqlite.SQLiteDatabase
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
-import java.io.IOException
-import android.content.Context
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import com.grindrplus.GrindrPlus
-import com.grindrplus.bridge.BridgeClient
-
-
-
-
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 object HttpBodyLogger {
+    private const val FILENAME = "http_body_log.jsonl"
     @SuppressLint("StaticFieldLeak")
     private var grindrPlus: GrindrPlus? = null
 
@@ -33,42 +28,53 @@ object HttpBodyLogger {
     }
 
     private suspend fun logInternal(url: String, method: String, body: String?) {
-        val db = getDatabase()
-        try {
-            val values = ContentValues().apply {
-                put("timestamp", System.currentTimeMillis() / 1000)
-                put("url", url)
-                put("method", method)
-                put("response_body", body)
+        withContext(Dispatchers.IO) {
+            try {
+                val gp = grindrPlus ?: throw IllegalStateException("HttpBodyLogger not initialized")
+                val context = gp.context
+                val storageUriStr = Config.get("storage_uri", "") as? String
+                if (storageUriStr.isNullOrEmpty()) {
+                    // Don't log if the storage location isn't set
+                    return@withContext
+                }
+
+                val docDir = DocumentFile.fromTreeUri(context, Uri.parse(storageUriStr))
+                if (docDir == null || !docDir.canWrite()) {
+                    Logger.e("HttpBodyLogger: Cannot write to the selected directory.")
+                    return@withContext
+                }
+
+                var logFile = docDir.findFile(FILENAME)
+                if (logFile == null) {
+                    logFile = docDir.createFile("application/json-lines", FILENAME)
+                }
+
+                if (logFile == null) {
+                    Logger.e("HttpBodyLogger: Failed to create log file.")
+                    return@withContext
+                }
+
+                // Create a JSON object for the log entry
+                val logEntry = JSONObject().apply {
+                    put("timestamp", System.currentTimeMillis() / 1000)
+                    put("url", url)
+                    put("method", method)
+                    // Attempt to parse the body as a JSONObject for clean formatting
+                    try {
+                        put("response_body", JSONObject(body))
+                    } catch (e: Exception) {
+                        put("response_body", body) // Fallback to string if not a valid JSON
+                    }
+                }
+
+                // Append the JSON string as a new line to the file
+                context.contentResolver.openOutputStream(logFile.uri, "wa")?.use { outputStream ->
+                    outputStream.write((logEntry.toString() + "\n").toByteArray())
+                }
+
+            } catch (e: Exception) {
+                Logger.e("Failed to write to HTTP body log file: ${e.message}")
             }
-            db.insert("logs", null, values)
-        } catch (e: Exception) {
-            Logger.e("Failed to write to HTTP body log database: ${e.message}")
-        } finally {
-            db.close()
-        }
-    }
-
-    private suspend fun getDatabase(): SQLiteDatabase {
-        val gp = grindrPlus ?: throw IllegalStateException("HttpBodyLogger not initialized with GrindrPlus")
-        val dbFile = gp.bridgeClient.getHttpDbFile() ?: throw IOException("Failed to get DB file from BridgeService")
-        return SQLiteDatabase.openOrCreateDatabase(dbFile, null)
-    }
-
-    suspend fun initializeDatabase() {
-        val db = getDatabase()
-        try {
-            db.execSQL("""
-                CREATE TABLE IF NOT EXISTS logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp INTEGER NOT NULL,
-                    url TEXT NOT NULL,
-                    method TEXT NOT NULL,
-                    response_body TEXT
-                )
-            """)
-        } finally {
-            db.close()
         }
     }
 }

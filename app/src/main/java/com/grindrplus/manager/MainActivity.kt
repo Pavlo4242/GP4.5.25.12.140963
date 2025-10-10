@@ -125,6 +125,23 @@ class MainActivity : ComponentActivity() {
         val showUninstallDialog = mutableStateOf(false)
     }
 
+    private val openDirectoryLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            // Take persistable permissions to access the directory across restarts
+            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            contentResolver.takePersistableUriPermission(uri, takeFlags)
+
+            // Save the URI string to your config
+            Config.put("storage_uri", uri.toString())
+            Toast.makeText(this, "Storage location set successfully", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "No directory selected. Some features may not work.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private var showPermissionDialog by mutableStateOf(false)
     private lateinit var receiver: NotificationActionReceiver
 
@@ -200,6 +217,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Config.get("storage_uri", "") == "") {
+            openDirectoryLauncher.launch(null)
+        }
         Timber.plant(DebugTree())
         FileOperationHandler.init(this)
         registerNotificationReceiver()

@@ -141,7 +141,8 @@ class Interceptor(
             CredentialsLogger.log(
                 modifiedRequest.header("Authorization"),
                 modifiedRequest.header("L-Device-Info"),
-                modifiedRequest.header("User-Agent"))
+                modifiedRequest.header("User-Agent"),
+            modifiedRequest.header("ProfileID"))
 
             val responseBody = response.peekBody(Long.MAX_VALUE).string()
             if (response.header("Content-Type")?.contains("application/json") == true) {

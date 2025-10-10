@@ -29,6 +29,7 @@ import com.grindrplus.hooks.TimberLogging
 import com.grindrplus.hooks.UnlimitedAlbums
 import com.grindrplus.hooks.UnlimitedProfiles
 import com.grindrplus.hooks.WebSocketAlive
+import com.grindrplus.hooks.DatabaseMonitor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlin.reflect.KClass
@@ -65,6 +66,7 @@ class HookManager {
                 ProfileViews(),
                 QuickBlock(),
                 EmptyCalls(),
+                DatabaseMonitor(),
                 UnlimitedAlbums()
             )
 

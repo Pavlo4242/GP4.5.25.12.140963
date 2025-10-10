@@ -29,7 +29,6 @@ class PatchApkStep(
         const val WRITE_PERMISSION = "android.permission.WRITE_EXTERNAL_STORAGE"
         const val MANAGE_PERMISSION = "android.permission.MANAGE_EXTERNAL_STORAGE"
     }
-
     override suspend fun doExecute(context: Context, print: Print) {
         print("Cleaning output directory...")
         outputDir.listFiles()?.forEach { it.delete() }
@@ -64,9 +63,9 @@ class PatchApkStep(
                     // Get the parent element (<manifest>) and remove the child
                     val manifestElement = manifest.getManifestElement()
                     manifestElement.remove(permissionToRemove)
-                    println("Removed permission: " + permissionNameToRemove)
+                    println("Removed permission: $WRITE_PERMISSION")
                 } else {
-                    println("Permission not found: " + permissionNameToRemove)
+                    println("Permission not found: $WRITE_PERMISSION")
                 }
 
 
@@ -74,10 +73,11 @@ class PatchApkStep(
                 val newPermission1 = "android.permission.WRITE_EXTERNAL_STORAGE"
                 val newPermission2 = "android.permission.MANAGE_EXTERNAL_STORAGE"
 
-                manifest.addUsesPermission(newPermission1)
-                manifest.addUsesPermission(newPermission2)
-                println("Added permission: " + newPermission1)
-                println("Added permission: " + newPermission2)
+                manifest.addUsesPermission(WRITE_PERMISSION)
+                manifest.addUsesPermission(MANAGE_PERMISSION)
+                println("Added permission: $WRITE_PERMISSION")
+                println("Added permission: $MANAGE_PERMISSION")
+
 
                 val metaElements = apkModule.androidManifest.applicationElement.getElements { element ->
                     element.name == "meta-data"

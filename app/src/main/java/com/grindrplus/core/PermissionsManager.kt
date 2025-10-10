@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.grindrplus.GrindrPlus.context
@@ -67,6 +68,43 @@ object PermissionManager {
         } else {
             requestBlock()
         }
+    }
+
+    fun checkStoragePermissionStatus(context: Context): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (Environment.isExternalStorageManager()) {
+                "GRANTED - MANAGE_EXTERNAL_STORAGE"
+            } else {
+                "DENIED - Needs MANAGE_EXTERNAL_STORAGE"
+            }
+        } else {
+            val readGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            val writeGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+
+            when {
+                readGranted && writeGranted -> "GRANTED - Legacy permissions"
+                else -> "DENIED - Needs legacy storage permissions"
+            }
+        }
+    }
+
+    fun testStoragePermission(context: Context) {
+        Logger.d("Storage permission status: ${checkStoragePermissionStatus(context)}", LogSource.MODULE)
+
+        // Test if MediaStore is accessible
+        try {
+            val contentResolver = context.contentResolver
+            val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            val accessible = cursor != null
+            cursor?.close()
+            Logger.d("MediaStore accessibility: $accessible", LogSource.MODULE)
+        } catch (e: Exception) {
+            Logger.e("MediaStore test failed: ${e.message}", LogSource.MODULE)
+        }
+
+        // Request permission
+        requestExternalStoragePermission(context, delayMs = 1000)
     }
 
     private fun requestLegacyStoragePermission(context: Context) {

@@ -1,18 +1,17 @@
 package com.grindrplus.core
 
-import android.os.Environment
+import android.net.Uri
 import android.util.Base64
+import androidx.documentfile.provider.DocumentFile
+import com.grindrplus.GrindrPlus
 import org.json.JSONObject
-import java.io.File
 
 object CredentialsLogger {
-    private val logFile = File(
-        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-        "GrindrAccess_Info.txt"
-    )
-
     // Cache the last token to avoid writing duplicate info
     private var lastAuthToken: String? = null
+
+    // Cache the last token to avoid writing duplicate info
+
 
     /**
      * Extracts the profileId from a JWT token.
@@ -33,17 +32,25 @@ object CredentialsLogger {
      * Logs the essential credentials to a separate file.
      * Only writes to the file if the auth token has changed.
      */
-    fun log(authToken: String?, lDeviceInfo: String?, userAgent: String?) {
-        // We only care about requests that are authenticated
-        if (authToken.isNullOrEmpty() || !authToken.startsWith("Grindr3 ")) return
-
-        val cleanAuthToken = authToken.substringAfter("Grindr3 ")
-
-        // If the token is the same as the last one we logged, do nothing.
-        if (cleanAuthToken == lastAuthToken) return
+    fun log(authToken: String?, lDeviceInfo: String?, userAgent: String?, profileId: String?) {
+        // ... initial checks ...
+        val cleanAuthToken = null
+        if (authToken.isNullOrEmpty() || !authToken.startsWith("Grindr3 ") || cleanAuthToken == lastAuthToken) return
 
         try {
-            val profileId = getProfileIdFromToken(cleanAuthToken)
+            val context = GrindrPlus.context
+            val storageUriStr = Config.get("storage_uri", "") as? String
+            if (storageUriStr.isNullOrEmpty()) {
+                Logger.e("Storage URI not set, cannot write credentials log.")
+                return
+            }
+            val storageUri = Uri.parse(storageUriStr)
+            val docDir = DocumentFile.fromTreeUri(context, storageUri) ?: return
+
+            var logFile = docDir.findFile("GrindrAccess_Info.txt")
+            if (logFile == null) {
+                logFile = docDir.createFile("text/plain", "GrindrAccess_Info.txt")
+            }
 
             val logMessage = buildString {
                 append("### Latest Grindr Credentials ###\n\n")
@@ -56,11 +63,10 @@ object CredentialsLogger {
             }
 
             // Overwrite the file with the latest credentials
-            logFile.writeText(logMessage)
-
-            // Update the cache
+            logFile?.let { context.contentResolver.openOutputStream(it.uri) }?.use { outputStream ->
+                outputStream.write(logMessage.toByteArray())
+            }
             lastAuthToken = cleanAuthToken
-
         } catch (e: Exception) {
             Logger.e("Failed to write to credentials log file: ${e.message}")
         }
