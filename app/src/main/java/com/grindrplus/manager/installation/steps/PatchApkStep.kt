@@ -105,6 +105,8 @@ class PatchApkStep(
                     print("Maps API key element not found in manifest, skipping replacement")
                 }
             }
+
+
         } catch (e: Exception) {
             print("Error applying Maps API key: ${e.message}")
         }

@@ -20,6 +20,7 @@ import java.util.TimeZone
 import okhttp3.Request.Builder
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.net.SocketTimeoutException
+import java.nio.charset.Charset
 import java.util.concurrent.TimeoutException
 
 class Interceptor(
@@ -31,10 +32,10 @@ class Interceptor(
     private fun modifyRequest(originalRequest: Request): Request {
         // search for 'getJwt().length() > 0 &&' in userSession
         val isLoggedIn = invokeMethodSafe(userSession, "p") as? Boolean ?: false
-        if (!isLoggedIn) {
+       /* if (!isLoggedIn) {
             PermissionManager.requestExternalStoragePermission(context, delayMs = 10000)
         }
-
+*/
         val builder: Builder = originalRequest.newBuilder()
 
         if (isLoggedIn) {
@@ -125,7 +126,7 @@ class Interceptor(
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
 
@@ -142,15 +143,32 @@ class Interceptor(
                 modifiedRequest.header("Authorization"),
                 modifiedRequest.header("L-Device-Info"),
                 modifiedRequest.header("User-Agent"),
-            modifiedRequest.header("ProfileID"))
+                modifiedRequest.header("profileId")
+            )
 
-            val responseBody = response.peekBody(Long.MAX_VALUE).string()
-            if (response.header("Content-Type")?.contains("application/json") == true) {
-                HttpBodyLogger.log(modifiedRequest.url.toString(), modifiedRequest.method, responseBody)
+            val requestBodyString = try {
+                val buffer = okio.Buffer()
+                modifiedRequest.body?.writeTo(buffer)
+                buffer.readString(Charset.forName("UTF-8"))
+            } catch (e: Exception) {
+                "-- failed to read request body --"
             }
 
-            return response
+            // [FIX] Use peekBody to read the response without consuming it.
+            val responseBodyString = response.peekBody(Long.MAX_VALUE).string()
 
+            if (response.header("Content-Type")?.contains("application/json") == true) {
+                // [FIX] Completed the call to the body logger.
+                HttpBodyLogger.logHttpBody(
+                    url = modifiedRequest.url.toString(),
+                    method = modifiedRequest.method,
+                    requestBody = requestBodyString,
+                    responseBody = responseBodyString
+                )
+            }
+
+            // [FIX] The intercepted response must be returned to the caller.
+            response
 
         } catch (e: SocketTimeoutException) {
             Logger.e("Request timeout: ${e.message}", LogSource.HTTP)

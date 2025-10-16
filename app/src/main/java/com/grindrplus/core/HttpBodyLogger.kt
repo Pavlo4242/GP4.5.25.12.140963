@@ -1,80 +1,88 @@
 package com.grindrplus.core
 
-import android.annotation.SuppressLint
-import android.net.Uri
-import androidx.documentfile.provider.DocumentFile
-import com.grindrplus.GrindrPlus
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
+import android.content.ContentValues
+import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+
+import java.io.File
 
 object HttpBodyLogger {
-    private const val FILENAME = "http_body_log.jsonl"
-    @SuppressLint("StaticFieldLeak")
-    private var grindrPlus: GrindrPlus? = null
-
-    fun initialize(grindrPlusInstance: GrindrPlus) {
-        this.grindrPlus = grindrPlusInstance
+    @Volatile
+    private var databaseHelper: HttpBodyDatabaseHelper? = null
+    private val LOCK = Any()
+        /**
+     * Manually initializes the database helper. This must be called before any logging can occur.
+     * It is thread-safe and can be called multiple times without issue.
+     */
+    fun initialize(context: Context) {
+        if (databaseHelper == null) {
+            synchronized(LOCK) {
+                if (databaseHelper == null) {
+                    databaseHelper = HttpBodyDatabaseHelper(context.applicationContext)
+                    Logger.i("HttpBodyLogger initialized.")
+                }
+            }
+        }
     }
 
-    fun log(url: String, method: String, body: String?) {
-        if (body.isNullOrEmpty() || !body.trim().startsWith("{")) {
+    fun logHttpBody(url: String, method: String, requestBody: String?, responseBody: String?) {
+        // Get the helper instance. If it's null (not initialized), exit the function immediately.
+        val dbHelper = databaseHelper ?: return
+
+        if (requestBody.isNullOrBlankOrEmptyJson() && responseBody.isNullOrBlankOrEmptyJson()) {
             return
         }
 
-        GrindrPlus.executeAsync {
-            logInternal(url, method, body)
+        try {
+            val db = dbHelper.writableDatabase
+            val values = ContentValues().apply {
+                put("timestamp", System.currentTimeMillis())
+                put("url", url)
+                put("method", method)
+                if (!requestBody.isNullOrBlankOrEmptyJson()) {
+                    put("request_body", requestBody)
+                }
+                if (!responseBody.isNullOrBlankOrEmptyJson()) {
+                    put("response_body", responseBody)
+                }
+            }
+            db.insert("http_body_logs", null, values)
+        } catch (e: Exception) {
+            Logger.e("Failed to write to HTTP body log database: ${e.message}")
         }
     }
 
-    private suspend fun logInternal(url: String, method: String, body: String?) {
-        withContext(Dispatchers.IO) {
-            try {
-                val gp = grindrPlus ?: throw IllegalStateException("HttpBodyLogger not initialized")
-                val context = gp.context
-                val storageUriStr = Config.get("storage_uri", "") as? String
-                if (storageUriStr.isNullOrEmpty()) {
-                    // Don't log if the storage location isn't set
-                    return@withContext
-                }
+    fun getDatabasePath(): String {
+        return databaseHelper?.readableDatabase?.path ?: "HttpBodyLogger not initialized"
+    }
 
-                val docDir = DocumentFile.fromTreeUri(context, Uri.parse(storageUriStr))
-                if (docDir == null || !docDir.canWrite()) {
-                    Logger.e("HttpBodyLogger: Cannot write to the selected directory.")
-                    return@withContext
-                }
+    private fun String?.isNullOrBlankOrEmptyJson(): Boolean {
+        return this.isNullOrBlank() || this == "{}" || this == "[]"
+    }
 
-                var logFile = docDir.findFile(FILENAME)
-                if (logFile == null) {
-                    logFile = docDir.createFile("application/json-lines", FILENAME)
-                }
+    private class HttpBodyDatabaseHelper(context: Context) : SQLiteOpenHelper(
+        context,
+        File(context.cacheDir, "HttpBodyLogs.db").absolutePath,
+        null,
+        1
+    ) {
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS http_body_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER NOT NULL,
+                    url TEXT NOT NULL,
+                    method TEXT NOT NULL,
+                    request_body TEXT,
+                    response_body TEXT
+                )
+            """.trimIndent())
+        }
 
-                if (logFile == null) {
-                    Logger.e("HttpBodyLogger: Failed to create log file.")
-                    return@withContext
-                }
-
-                // Create a JSON object for the log entry
-                val logEntry = JSONObject().apply {
-                    put("timestamp", System.currentTimeMillis() / 1000)
-                    put("url", url)
-                    put("method", method)
-                    // Attempt to parse the body as a JSONObject for clean formatting
-                    try {
-                        put("response_body", JSONObject(body))
-                    } catch (e: Exception) {
-                        put("response_body", body) // Fallback to string if not a valid JSON
-                    }
-                }
-
-                // Append the JSON string as a new line to the file
-                context.contentResolver.openOutputStream(logFile.uri, "wa")?.use { outputStream ->
-                    outputStream.write((logEntry.toString() + "\n").toByteArray())
-                }
-
-            } catch (e: Exception) {
-                Logger.e("Failed to write to HTTP body log file: ${e.message}")
-            }
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            db.execSQL("DROP TABLE IF EXISTS http_body_logs")
+            onCreate(db)
         }
     }
 }

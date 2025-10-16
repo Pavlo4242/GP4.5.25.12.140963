@@ -87,24 +87,20 @@ object PermissionManager {
             }
         }
     }
+/*
 
-    fun testStoragePermission(context: Context) {
-        Logger.d("Storage permission status: ${checkStoragePermissionStatus(context)}", LogSource.MODULE)
+       fun autoRequestOnFirstLaunch(context: Context) {
+          val firstLaunch = Config.get("first_launch", true) as Boolean
+          if (firstLaunch) {
+               requestExternalStoragePermission(context, delayMs = 600000)
+          }
+       }
+*/
 
-        // Test if MediaStore is accessible
-        try {
-            val contentResolver = context.contentResolver
-            val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val cursor = contentResolver.query(uri, null, null, null, null)
-            val accessible = cursor != null
-            cursor?.close()
-            Logger.d("MediaStore accessibility: $accessible", LogSource.MODULE)
-        } catch (e: Exception) {
-            Logger.e("MediaStore test failed: ${e.message}", LogSource.MODULE)
-        }
-
-        // Request permission
-        requestExternalStoragePermission(context, delayMs = 1000)
+    fun requestAfterInstallConfirmation(context: Context) {
+        Handler(Looper.getMainLooper()).postDelayed({
+            requestExternalStoragePermission(context)
+        }, 5000)
     }
 
     private fun requestLegacyStoragePermission(context: Context) {

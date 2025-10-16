@@ -81,7 +81,7 @@ android {
         outputs.configureEach {
             val sanitizedVersionName = versionName.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_')
             (this as BaseVariantOutputImpl).outputFileName =
-                "GPlus_v${sanitizedVersionName}-${name}.apk"
+                "12.140963_v${sanitizedVersionName}-${name}.apk"
         }
     }
 }
@@ -171,14 +171,14 @@ tasks.register("setupLSPatch") {
         exec {
             commandLine = listOf("zip", "-d", "./libs/lspatch.jar", "com/google/errorprone/annotations/*")
         }
-        exec {
+       /* exec {
             commandLine = listOf(
                 "zip",
                 "-d",
                 "./libs/lspatch.jar",
                 "META-INF/services/kotlinx.coroutines.CoroutineExceptionHandler"
             )
-        }
+        }*/
     }
 }
 
