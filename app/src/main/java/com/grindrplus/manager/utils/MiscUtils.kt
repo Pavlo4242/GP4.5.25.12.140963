@@ -6,6 +6,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.Socket
 
+fun isLSPosed(): Boolean {
+    // This gets hooked by LSPosed, so if it
+    // returns true, LSPosed is installed
+    return false;
+}
+
 suspend fun uploadAndShare(text: String, context: Context) {
     val response = withContext(Dispatchers.IO) {
         Socket("termbin.com", 9999).use { socket ->
@@ -24,3 +30,4 @@ suspend fun uploadAndShare(text: String, context: Context) {
         Intent.createChooser(sendIntent, "Share installation logs")
     context.startActivity(shareIntent)
 }
+

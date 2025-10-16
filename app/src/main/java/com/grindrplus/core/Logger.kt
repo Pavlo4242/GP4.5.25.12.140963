@@ -7,6 +7,7 @@ import com.grindrplus.bridge.BridgeClient
 import com.grindrplus.utils.Hook
 import com.grindrplus.utils.Task
 import timber.log.Timber
+import java.io.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,10 +19,12 @@ enum class LogSource { MODULE, MANAGER, HOOK, TASK, BRIDGE, UNKNOWN, HTTP }
 @SuppressLint("StaticFieldLeak", "ConstantLocale")
 object Logger {
     private const val TAG = "GrindrPlus"
+    private const val HTTP_LOG_FILE = "http_logs.txt"
     private var isModuleContext = false
     private var bridgeClient: BridgeClient? = null
     private val hookPrefixes = ConcurrentHashMap<String, String>()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    private var httpLogFile: File? = null
 
     fun initialize(context: Context, bridge: BridgeClient, isModule: Boolean) {
         bridgeClient = bridge
@@ -30,6 +33,18 @@ object Logger {
         if (Timber.forest().isEmpty()) {
             Timber.plant(Timber.DebugTree())
         }
+        try {
+            val logDir = context.getExternalFilesDir(null)
+            if (logDir != null) {
+                httpLogFile = File(logDir, HTTP_LOG_FILE)
+                if (!httpLogFile!!.exists()) {
+                    httpLogFile!!.createNewFile()
+                }
+            }
+        } catch (e: IOException) {
+            Timber.tag(TAG).e("Failed to initialize HTTP log file: ${e.message}")
+        }
+
     }
 
     fun registerHookPrefix(subName: String, prefix: String = subName) {
@@ -79,6 +94,10 @@ object Logger {
             "$priorityChar/$timestamp/$sourceName: $message"
         }
 
+        if (source == LogSource.HTTP) {
+            writeToHttpLogFile(conciseMessage)
+        }
+
         val logcatMessage = buildLogcatMessage(source, subName, message, level == LogLevel.SUCCESS)
         when (level) {
             LogLevel.DEBUG -> Timber.tag(TAG).v(logcatMessage)
@@ -93,6 +112,19 @@ object Logger {
                 bridge.getService()?.writeRawLog(conciseMessage)
             } catch (e: Exception) {
                 Timber.tag(TAG).e("Failed to send log to bridge service: ${e.message}")
+            }
+        }
+    }
+
+    private fun writeToHttpLogFile(logMessage: String) {
+        httpLogFile?.let {
+            try {
+                FileWriter(it, true).use { writer ->
+                    writer.append(logMessage)
+                    writer.append("\n")
+                }
+            } catch (e: IOException) {
+                Timber.tag(TAG).e("Failed to write to HTTP log file: ${e.message}")
             }
         }
     }

@@ -1,16 +1,13 @@
 package com.grindrplus.core.http
 
-import android.os.Build
-import androidx.annotation.RequiresApi
 import com.grindrplus.GrindrPlus
-import com.grindrplus.GrindrPlus.bridgeClient
-import com.grindrplus.GrindrPlus.context
 import com.grindrplus.core.CredentialsLogger
 import com.grindrplus.core.HttpBodyLogger
-import com.grindrplus.core.HttpLogger
+//import com.grindrplus.core.HttpLogger
 import com.grindrplus.core.Logger
 import com.grindrplus.core.LogSource
-import com.grindrplus.core.PermissionManager
+import com.grindrplus.manager.utils.PermissionManager
+import de.robv.android.xposed.XposedBridge
 import okhttp3.Interceptor
 import okhttp3.Protocol
 import okhttp3.Request
@@ -20,7 +17,6 @@ import java.util.TimeZone
 import okhttp3.Request.Builder
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.net.SocketTimeoutException
-import java.nio.charset.Charset
 import java.util.concurrent.TimeoutException
 
 class Interceptor(
@@ -31,11 +27,14 @@ class Interceptor(
 
     private fun modifyRequest(originalRequest: Request): Request {
         // search for 'getJwt().length() > 0 &&' in userSession
-        val isLoggedIn = invokeMethodSafe(userSession, "p") as? Boolean ?: false
-       /* if (!isLoggedIn) {
-            PermissionManager.requestExternalStoragePermission(context, delayMs = 10000)
+        val isLoggedIn = invokeMethodSafe(userSession, "s") as? Boolean ?: false
+
+        if (!isLoggedIn) {
+            PermissionManager.requestExternalStoragePermission(GrindrPlus.context, delayMs = 3000)
+            Logger.i("Triggered external storage permission request from Interceptor (user not logged in)", LogSource.HTTP)
         }
-*/
+
+
         val builder: Builder = originalRequest.newBuilder()
 
         if (isLoggedIn) {
@@ -126,7 +125,6 @@ class Interceptor(
         }
     }
 
-
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
 
@@ -135,40 +133,22 @@ class Interceptor(
             Logger.d("Intercepting request to: ${request.url}", LogSource.HTTP)
             val response= chain.proceed(modifiedRequest)
 
-            HttpLogger.log(modifiedRequest, response)
+            //  HttpLogger.log(modifiedRequest, response)
 
 
 
             CredentialsLogger.log(
                 modifiedRequest.header("Authorization"),
                 modifiedRequest.header("L-Device-Info"),
-                modifiedRequest.header("User-Agent"),
-                modifiedRequest.header("profileId")
-            )
+                modifiedRequest.header("User-Agent"))
 
-            val requestBodyString = try {
-                val buffer = okio.Buffer()
-                modifiedRequest.body?.writeTo(buffer)
-                buffer.readString(Charset.forName("UTF-8"))
-            } catch (e: Exception) {
-                "-- failed to read request body --"
-            }
-
-            // [FIX] Use peekBody to read the response without consuming it.
-            val responseBodyString = response.peekBody(Long.MAX_VALUE).string()
-
+            val responseBody = response.peekBody(Long.MAX_VALUE).string()
             if (response.header("Content-Type")?.contains("application/json") == true) {
-                // [FIX] Completed the call to the body logger.
-                HttpBodyLogger.logHttpBody(
-                    url = modifiedRequest.url.toString(),
-                    method = modifiedRequest.method,
-                    requestBody = requestBodyString,
-                    responseBody = responseBodyString
-                )
+                HttpBodyLogger.log(modifiedRequest.url.toString(), modifiedRequest.method, body = responseBody)
             }
 
-            // [FIX] The intercepted response must be returned to the caller.
-            response
+            return response
+
 
         } catch (e: SocketTimeoutException) {
             Logger.e("Request timeout: ${e.message}", LogSource.HTTP)

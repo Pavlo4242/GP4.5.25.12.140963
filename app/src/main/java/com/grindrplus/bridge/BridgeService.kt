@@ -4,23 +4,20 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.ContentResolver
 import android.app.Service
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
-import android.os.Environment
 import android.os.IBinder
 import android.os.Process
-import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
-import com.grindrplus.GrindrPlus.context
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.Logger
+import com.grindrplus.manager.fetchNotifs
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
@@ -37,36 +34,6 @@ class BridgeService : Service() {
     private val configFile by lazy { File(getExternalFilesDir(null), "grindrplus.json") }
     private val logFile by lazy { File(getExternalFilesDir(null), "grindrplus.log") }
     private val blockEventsFile by lazy { File(getExternalFilesDir(null), "block_events.json") }
-
-    private val credentialsLogFile by lazy {
-        File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "GrindrAccess_Info.txt"
-        )
-    }
-
-    private fun getHttpDbFile(): File {
-        val httpLogDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "HttpLog"
-        )
-        if (!httpLogDir.exists()) {
-            httpLogDir.mkdirs()
-        }
-        return File(httpLogDir, "HttpBodyLogs.db")
-    }
-
-
-    //    private val dbFile by lazy {context.getContentResolver();
-//    val contentValues = ContentValues().apply {
-//        put(MediaStore.MediaColumns.DISPLAY_NAME, "HttpBodyLogs.db");
-//        put(MediaStore.MediaColumns.MIME_TYPE, "application/vnd.sqlite3")
-//        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-//            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/HttpLog")
-//        }
-//    }
-//    }
     private val blockEventsLock = ReentrantLock()
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val logLock = ReentrantLock()
@@ -115,6 +82,17 @@ class BridgeService : Service() {
                 .setOngoing(true)
                 .setShowWhen(false)
                 .build()
+
+            try {
+                periodicTasksExecutor.scheduleWithFixedDelay(
+                    { runBlocking { fetchNotifs(this@BridgeService) } },
+                    0,
+                    15,
+                    java.util.concurrent.TimeUnit.SECONDS
+                )
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Failed to schedule periodic tasks")
+            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceCompat.startForeground(
@@ -168,9 +146,8 @@ class BridgeService : Service() {
     }
 
     private val binder = object : IBridgeService.Stub() {
+        interface IBridgeService {
 
-        override fun getHttpDbFilePath(): String? {
-            return getHttpDbFile().absolutePath
         }
 
         override fun getConfig(): String {
@@ -223,17 +200,6 @@ class BridgeService : Service() {
                     appendToLog(content + (if (!content.endsWith("\n")) "\n" else ""))
                 } catch (e: Exception) {
                     Logger.e("Error writing raw log entry", LogSource.BRIDGE)
-                    Logger.writeRaw(e.stackTraceToString())
-                }
-            }
-        }
-
-        override fun writeCredentialsLog(content: String) {
-            ioExecutor.execute {
-                try {
-                    credentialsLogFile.writeText(content)
-                } catch (e: Exception) {
-                    Logger.e("Error writing credentials log", LogSource.BRIDGE)
                     Logger.writeRaw(e.stackTraceToString())
                 }
             }
@@ -421,6 +387,14 @@ class BridgeService : Service() {
                 coordinatesFile.delete()
             }
         }
+
+        override fun isRooted(): Boolean {
+            return com.grindrplus.manager.utils.isRooted(applicationContext)
+        }
+
+        override fun isLSPosed(): Boolean {
+            return com.grindrplus.manager.utils.isLSPosed()
+        }
     }
 
     private fun createNotificationChannel(
@@ -551,4 +525,3 @@ class BridgeService : Service() {
         const val CHANNEL_UNBLOCKS = "grindr_plus_unblocks"
         const val CHANNEL_GENERAL = "grindr_plus_general"
     }
-}

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Home
@@ -71,13 +72,16 @@ import com.grindrplus.bridge.NotificationActionReceiver
 import com.grindrplus.core.Config
 import com.grindrplus.core.Constants.GRINDR_PACKAGE_NAME
 import com.grindrplus.core.Logger
+import com.grindrplus.manager.MainNavItem.*
 import com.grindrplus.manager.ui.BlockLogScreen
 import com.grindrplus.manager.ui.CalculatorScreen
 import com.grindrplus.manager.ui.HomeScreen
 import com.grindrplus.manager.ui.InstallPage
 import com.grindrplus.manager.ui.SettingsScreen
+import com.grindrplus.manager.ui.NotificationScreen
 import com.grindrplus.manager.ui.theme.GrindrPlusTheme
 import com.grindrplus.manager.utils.FileOperationHandler
+import com.grindrplus.manager.utils.isLSPosed
 import com.grindrplus.utils.HookManager
 import com.grindrplus.utils.TaskManager
 import com.onebusaway.plausible.android.AndroidResourcePlausibleConfig
@@ -111,11 +115,15 @@ sealed class MainNavItem(
 
     data object BlockLog : MainNavItem(Icons.Filled.History, "Block Log", { BlockLogScreen(this) })
 
+    data object Notifications : MainNavItem(Icons.Filled.Newspaper, "News", { NotificationScreen(this) })
+
     // data object Albums : MainNavItem(Icons.Rounded.PhotoAlbum, "Albums", { ComingSoon() })
     // data object Experiments : MainNavItem(Icons.Rounded.Science, "Experiments", { ComingSoon() })
 
     companion object {
-        val VALUES by lazy { listOf(InstallPage, Home, BlockLog, Settings) }
+        val VALUES by lazy {
+            listOf(InstallPage, BlockLog, Home, Notifications, Settings)
+        }
     }
 }
 
@@ -123,23 +131,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         var plausible: Plausible? = null
         val showUninstallDialog = mutableStateOf(false)
-    }
-
-    private val openDirectoryLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            // Take persistable permissions to access the directory across restarts
-            val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            contentResolver.takePersistableUriPermission(uri, takeFlags)
-
-            // Save the URI string to your config
-            Config.put("storage_uri", uri.toString())
-            Toast.makeText(this, "Storage location set successfully", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "No directory selected. Some features may not work.", Toast.LENGTH_LONG).show()
-        }
     }
 
     private var showPermissionDialog by mutableStateOf(false)
@@ -194,6 +185,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun checkStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) { // This permission is for Android 11+
+            if (!android.os.Environment.isExternalStorageManager()) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = "package:$packageName".toUri()
+                }
+                Toast.makeText(
+                    this,
+                    "GrindrPlus needs access to manage files",
+                    Toast.LENGTH_LONG
+                ).show()
+                startActivity(intent)
+            }
+        }
+    }
+
     private fun registerNotificationReceiver() {
         try {
             receiver = NotificationActionReceiver()
@@ -217,9 +224,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Config.get("storage_uri", "") == "") {
-            openDirectoryLauncher.launch(null)
-        }
         Timber.plant(DebugTree())
         FileOperationHandler.init(this)
         registerNotificationReceiver()
@@ -252,35 +256,44 @@ class MainActivity : ComponentActivity() {
             var showUninstallDialogState by remember { showUninstallDialog }
             var calculatorScreen = remember { mutableStateOf(false) }
 
+// Inside the setContent block in onCreate
             LaunchedEffect(Unit) {
                 GrindrPlus.bridgeClient = BridgeClient(this@MainActivity)
                 GrindrPlus.bridgeClient.connectAsync { connected ->
                     Logger.initialize(this@MainActivity, GrindrPlus.bridgeClient, false)
-                    Config.initialize()
+                    Config.initialize() // [cite: 18]
                     HookManager().registerHooks(false)
                     TaskManager().registerTasks(false)
                     calculatorScreen.value = Config.get("discreet_icon", false) as Boolean
                     serviceBound = true
 
-                    if (!(Config.get("disable_permission_checks", false) as Boolean)) {
-                        checkNotificationPermission()
-                        checkUnknownSourcesPermission()
+                    if (!(Config.get("disable_permission_checks", false) as Boolean)) { // [cite: 19]
+                        // --- MODIFIED PERMISSION LOGIC ---
+                        // Check for unknown sources first.
+                        val hasUnknownSourcesPerm = packageManager.canRequestPackageInstalls()
+                        if (!hasUnknownSourcesPerm) {
+                            checkUnknownSourcesPermission()
+                        } else {
+                            // If unknown sources is already granted, check for storage permission.
+                            checkStoragePermission()
+                        }
+                        // --- END OF MODIFICATION ---
                     }
 
-                    if (Config.get("analytics", true) as Boolean) {
+                    if (Config.get("analytics", true) as Boolean) { // [cite: 20]
                         val config = AndroidResourcePlausibleConfig(this@MainActivity).also {
                             it.domain = "grindrplus.lol"
                             it.host = "https://plausible.gmmz.dev/api/"
-                            it.enable = true
+                            it.enable = true // [cite: 21]
                         }
 
                         plausible = Plausible(
-                            config = config,
+                            config = config, // [cite: 22]
                             client = NetworkFirstPlausibleClient(config)
                         )
 
                         plausible?.enable(true)
-                        plausible?.pageView(
+                        plausible?.pageView( // [cite: 23]
                             "app://grindrplus/home",
                             props = mapOf("android_version" to Build.VERSION.SDK_INT)
                         )
@@ -289,9 +302,8 @@ class MainActivity : ComponentActivity() {
                     if (Config.get("first_launch", true) as Boolean) {
                         firstLaunchDialog = true
                         patchInfoDialog = true
-                        plausible?.pageView("app://grindrplus/first_launch")
+                        plausible?.pageView("app://grindrplus/first_launch") // [cite: 25]
                         Config.put("first_launch", false)
-
                     }
                 }
             }
@@ -561,7 +573,7 @@ class MainActivity : ComponentActivity() {
                         content = { innerPadding ->
                             NavHost(
                                 navController,
-                                startDestination = MainNavItem.Home.toString()
+                                startDestination = Home.toString()
                             ) {
                                 for (item in MainNavItem.VALUES) {
                                     composable(item.toString()) {
@@ -578,13 +590,13 @@ class MainActivity : ComponentActivity() {
                                 var selectedItem by remember { mutableIntStateOf(0) }
                                 var currentRoute =
                                     navController.currentBackStackEntryAsState().value?.destination?.route
-                                        ?: MainNavItem.Home.toString()
+                                        ?: Home.toString()
 
-                                    MainNavItem.VALUES.forEachIndexed { index, navigationItem ->
-                                        if (navigationItem.toString() == currentRoute) {
-                                            selectedItem = index
-                                        }
+                                MainNavItem.VALUES.forEachIndexed { index, navigationItem ->
+                                    if (navigationItem.toString() == currentRoute) {
+                                        selectedItem = index
                                     }
+                                }
 
                                 NavigationBar {
                                     MainNavItem.VALUES.forEachIndexed { index, item ->
