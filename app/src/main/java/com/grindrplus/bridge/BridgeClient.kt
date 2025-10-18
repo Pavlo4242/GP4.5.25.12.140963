@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.Process
 import com.grindrplus.BuildConfig
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.Logger
@@ -581,7 +582,7 @@ class BridgeClient(private val context: Context) {
         }
     }
 
-    fun isRooted(): Boolean {
+   /* fun isRooted(): Boolean {
         if (!isBound.get()) {
             if (connectBlocking(3000)) {
                 Logger.d("Connected to service on-demand for isRooted", LogSource.BRIDGE)
@@ -592,12 +593,12 @@ class BridgeClient(private val context: Context) {
         }
 
         return try {
-            bridgeService?.isRooted() ?: false
+            bridgeService?.isRooted ?: false
         } catch (e: Exception) {
             Logger.e("Error checking root status: ${e.message}", LogSource.BRIDGE)
             false
         }
-    }
+    }*/
 
     fun isLSPosed(): Boolean {
         if (!isBound.get()) {

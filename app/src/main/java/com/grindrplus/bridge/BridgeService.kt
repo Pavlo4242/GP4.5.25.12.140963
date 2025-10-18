@@ -146,10 +146,6 @@ class BridgeService : Service() {
     }
 
     private val binder = object : IBridgeService.Stub() {
-        interface IBridgeService {
-
-        }
-
         override fun getConfig(): String {
             Logger.d("getConfig() called")
             return try {
@@ -388,9 +384,9 @@ class BridgeService : Service() {
             }
         }
 
-        override fun isRooted(): Boolean {
+      /*  override fun isRooted(): Boolean {
             return com.grindrplus.manager.utils.isRooted(applicationContext)
-        }
+        }*/
 
         override fun isLSPosed(): Boolean {
             return com.grindrplus.manager.utils.isLSPosed()
@@ -525,3 +521,4 @@ class BridgeService : Service() {
         const val CHANNEL_UNBLOCKS = "grindr_plus_unblocks"
         const val CHANNEL_GENERAL = "grindr_plus_general"
     }
+}

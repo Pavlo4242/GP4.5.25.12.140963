@@ -84,6 +84,13 @@ android {
                 "12.140963_v${sanitizedVersionName}-${name}.apk"
         }
     }
+
+    sourceSets {
+        getByName("main") {
+            aidl.srcDirs("src/main/java")
+        }
+    }
+
 }
 
 dependencies {
