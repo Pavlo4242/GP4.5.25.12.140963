@@ -12,6 +12,10 @@ import de.robv.android.xposed.XposedHelpers.getObjectField
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlin.collections.getOrNull
+import kotlin.collections.isNotEmpty
+import kotlin.stackTraceToString
+import kotlin.text.split
 
 class ConversationTracker : Hook(
     "Conversation Tracker",

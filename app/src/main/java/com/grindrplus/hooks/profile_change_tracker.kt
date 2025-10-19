@@ -14,6 +14,9 @@ import de.robv.android.xposed.XposedHelpers.callMethod
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import kotlin.collections.isNotEmpty
+import kotlin.stackTraceToString
 
 class ProfileChangeTracker : Hook(
     "Profile Change Tracker",
@@ -65,12 +68,12 @@ class ProfileChangeTracker : Hook(
                 // Convert lists to JSON strings
                 val tribes = try {
                     val tribesList = getObjectField(profile, "tribes") as? List<*>
-                    org.json.JSONArray(tribesList ?: emptyList<String>()).toString()
+                    JSONArray(tribesList ?: emptyList<String>()).toString()
                 } catch (e: Exception) { null }
 
                 val lookingFor = try {
                     val lookingForList = getObjectField(profile, "lookingFor") as? List<*>
-                    org.json.JSONArray(lookingForList ?: emptyList<String>()).toString()
+                    JSONArray(lookingForList ?: emptyList<String>()).toString()
                 } catch (e: Exception) { null }
 
                 val snapshot = ProfileSnapshot(
