@@ -379,12 +379,14 @@ class BridgeClient(private val context: Context) {
         }
 
         return try {
-            bridgeService?.config?.let { JSONObject(it) } ?: JSONObject()
+            val configStr = bridgeService?.getConfig() ?: "{}"
+            JSONObject(configStr)
         } catch (e: Exception) {
             Logger.e("Error getting config: ${e.message}", LogSource.BRIDGE)
             JSONObject()
         }
     }
+
 
     fun setConfig(config: JSONObject) {
         if (!isBound.get()) {
@@ -431,7 +433,8 @@ class BridgeClient(private val context: Context) {
         }
 
         return try {
-            bridgeService?.blockEvents?.let { JSONArray(it) } ?: JSONArray()
+            val eventsStr = bridgeService?.getBlockEvents() ?: "[]"
+            JSONArray(eventsStr)
         } catch (e: Exception) {
             Logger.e("Error getting block events: ${e.message}", LogSource.BRIDGE)
             JSONArray()
@@ -582,23 +585,23 @@ class BridgeClient(private val context: Context) {
         }
     }
 
-   /* fun isRooted(): Boolean {
-        if (!isBound.get()) {
-            if (connectBlocking(3000)) {
-                Logger.d("Connected to service on-demand for isRooted", LogSource.BRIDGE)
-            } else {
-                Logger.w("Cannot check root status, service not bound", LogSource.BRIDGE)
-                return false
-            }
-        }
+    /* fun isRooted(): Boolean {
+         if (!isBound.get()) {
+             if (connectBlocking(3000)) {
+                 Logger.d("Connected to service on-demand for isRooted", LogSource.BRIDGE)
+             } else {
+                 Logger.w("Cannot check root status, service not bound", LogSource.BRIDGE)
+                 return false
+             }
+         }
 
-        return try {
-            bridgeService?.isRooted ?: false
-        } catch (e: Exception) {
-            Logger.e("Error checking root status: ${e.message}", LogSource.BRIDGE)
-            false
-        }
-    }*/
+         return try {
+             bridgeService?.isRooted ?: false
+         } catch (e: Exception) {
+             Logger.e("Error checking root status: ${e.message}", LogSource.BRIDGE)
+             false
+         }
+     }*/
 
     fun isLSPosed(): Boolean {
         if (!isBound.get()) {

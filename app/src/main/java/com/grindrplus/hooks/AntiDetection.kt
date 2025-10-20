@@ -1,3 +1,4 @@
+
 package com.grindrplus.hooks
 
 import com.grindrplus.utils.Hook
@@ -9,14 +10,14 @@ class AntiDetection : Hook(
     "Anti Detection",
     "Hides root, emulator, and environment detections"
 ) {
-    private val grindrMiscClass = "bf.m" // search for '"sdk_gphone", "emulator", "simulator", "google_sdk"'
+    private val grindrMiscClass = "mg.n" // search for '"sdk_gphone", "emulator", "simulator", "google_sdk"'
     private val devicePropertiesCollector = "siftscience.android.DevicePropertiesCollector"
     private val commonUtils = "com.google.firebase.crashlytics.internal.common.CommonUtils"
     private val osData = "com.google.firebase.crashlytics.internal.model.AutoValue_StaticSessionData_OsData"
 
     override fun init() {
         findClass(grindrMiscClass)
-            .hook("M", HookStage.AFTER) { param ->
+            .hook("O", HookStage.AFTER) { param ->
                 param.setResult(false)
             }
 
@@ -25,10 +26,10 @@ class AntiDetection : Hook(
                 param.setResult(false)
             }
 
-//        findClass(commonUtils)
-//            .hook("isEmulator", HookStage.BEFORE) { param ->
-//                param.setResult(false)
-//            }
+        findClass(commonUtils)
+            .hook("isEmulator", HookStage.BEFORE) { param ->
+                param.setResult(false)
+            }
 
         findClass(commonUtils)
             .hook("isAppDebuggable", HookStage.BEFORE) { param ->

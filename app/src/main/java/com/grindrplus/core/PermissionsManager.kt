@@ -96,12 +96,14 @@ object PermissionManager {
           }
        }
 */
+/*
 
     fun requestAfterInstallConfirmation(context: Context) {
         Handler(Looper.getMainLooper()).postDelayed({
             requestExternalStoragePermission(context)
         }, 5000)
     }
+*/
 
     private fun requestLegacyStoragePermission(context: Context) {
         if (context is Activity) {

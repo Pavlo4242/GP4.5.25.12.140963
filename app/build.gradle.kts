@@ -77,6 +77,12 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("main") {
+            aidl.srcDirs("src/main/aidl")
+        }
+    }
+
     applicationVariants.configureEach {
         outputs.configureEach {
             val sanitizedVersionName = versionName.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_')
@@ -84,13 +90,6 @@ android {
                 "12.140963_v${sanitizedVersionName}-${name}.apk"
         }
     }
-
-    sourceSets {
-        getByName("main") {
-            aidl.srcDirs("src/main/java")
-        }
-    }
-
 }
 
 dependencies {

@@ -71,7 +71,11 @@ class BridgeService : Service() {
 
         try {
             val channelId = "bridge_service_channel"
-            createNotificationChannel(channelId, "GrindrPlus Background Service", "Keeps GrindrPlus running in background")
+            createNotificationChannel(
+                channelId,
+                "GrindrPlus Background Service",
+                "Keeps GrindrPlus running in background"
+            )
 
             val notification = NotificationCompat.Builder(this, channelId)
                 .setContentTitle("GrindrPlus")
@@ -147,7 +151,7 @@ class BridgeService : Service() {
 
     private val binder = object : IBridgeService.Stub() {
         override fun getConfig(): String {
-            Logger.d("getConfig() called")
+            Logger.d("getConfig() called", LogSource.BRIDGE)
             return try {
                 if (!configFile.exists()) {
                     configFile.createNewFile()
@@ -156,22 +160,21 @@ class BridgeService : Service() {
                     configFile.readText().ifBlank { "{}" }
                 }
             } catch (e: Exception) {
-                Logger.e("Error reading config file", LogSource.BRIDGE)
+                Logger.e("Error reading config file: ${e.message}", LogSource.BRIDGE)
                 Logger.writeRaw(e.stackTraceToString())
                 "{}"
             }
         }
 
         override fun setConfig(config: String?) {
-            Logger.d("setConfig() called")
+            Logger.d("setConfig() called", LogSource.BRIDGE)
             try {
                 if (!configFile.exists()) {
                     configFile.createNewFile()
                 }
-
                 configFile.writeText(config ?: "{}")
             } catch (e: Exception) {
-                Logger.e("Error writing to config file", LogSource.BRIDGE)
+                Logger.e("Error writing to config file: ${e.message}", LogSource.BRIDGE)
                 Logger.writeRaw(e.stackTraceToString())
             }
         }
@@ -183,7 +186,7 @@ class BridgeService : Service() {
                     val formattedLog = formatLogEntry(level, source, message, hookName)
                     appendToLog(formattedLog)
                 } catch (e: Exception) {
-                    Logger.e("Error writing log entry", LogSource.BRIDGE)
+                    Logger.e("Error writing log entry: ${e.message}", LogSource.BRIDGE)
                     Logger.writeRaw(e.stackTraceToString())
                 }
             }
@@ -195,14 +198,14 @@ class BridgeService : Service() {
                     checkAndManageLogSize()
                     appendToLog(content + (if (!content.endsWith("\n")) "\n" else ""))
                 } catch (e: Exception) {
-                    Logger.e("Error writing raw log entry", LogSource.BRIDGE)
+                    Logger.e("Error writing raw log entry: ${e.message}", LogSource.BRIDGE)
                     Logger.writeRaw(e.stackTraceToString())
                 }
             }
         }
 
         override fun clearLogs() {
-            Logger.d("clearLogs() called")
+            Logger.d("clearLogs() called", LogSource.BRIDGE)
             try {
                 logLock.withLock {
                     if (logFile.exists()) {
@@ -211,7 +214,7 @@ class BridgeService : Service() {
                     }
                 }
             } catch (e: Exception) {
-                Logger.e("Error clearing log file", LogSource.BRIDGE)
+                Logger.e("Error clearing log file: ${e.message}", LogSource.BRIDGE)
                 Logger.writeRaw(e.stackTraceToString())
             }
         }
@@ -224,7 +227,7 @@ class BridgeService : Service() {
             channelName: String,
             channelDescription: String
         ) {
-            Logger.d("sendNotification() called")
+            Logger.d("sendNotification() called", LogSource.BRIDGE)
             try {
                 createNotificationChannel(channelId, channelName, channelDescription)
 
@@ -239,7 +242,7 @@ class BridgeService : Service() {
                     notify(notificationId, notificationBuilder.build())
                 }
             } catch (e: Exception) {
-                Logger.e("Error sending notification", LogSource.BRIDGE)
+                Logger.e("Error sending notification: ${e.message}", LogSource.BRIDGE)
                 Logger.writeRaw(e.stackTraceToString())
             }
         }
@@ -255,7 +258,7 @@ class BridgeService : Service() {
             actionIntents: Array<String>,
             actionData: Array<String>
         ) {
-            Logger.d("sendNotificationWithActions() called")
+            Logger.d("sendNotificationWithActions() called", LogSource.BRIDGE)
             try {
                 createNotificationChannel(channelId, channelName, channelDescription)
 
@@ -288,7 +291,7 @@ class BridgeService : Service() {
                     notify(notificationId, notificationBuilder.build())
                 }
             } catch (e: Exception) {
-                Logger.e("Error sending notification with actions", LogSource.BRIDGE)
+                Logger.e("Error sending notification with actions: ${e.message}", LogSource.BRIDGE)
                 Logger.writeRaw(e.stackTraceToString())
             }
         }
@@ -338,7 +341,7 @@ class BridgeService : Service() {
                     blockEventsFile.readText().ifBlank { "[]" }
                 }
             } catch (e: Exception) {
-                Logger.e("Error reading block events file", LogSource.BRIDGE)
+                Logger.e("Error reading block events file: ${e.message}", LogSource.BRIDGE)
                 Logger.writeRaw(e.stackTraceToString())
                 "[]"
             }
@@ -353,7 +356,7 @@ class BridgeService : Service() {
                         blockEventsFile.writeText("[]")
                     }
                 } catch (e: Exception) {
-                    Logger.e("Error clearing block events file", LogSource.BRIDGE)
+                    Logger.e("Error clearing block events file: ${e.message}", LogSource.BRIDGE)
                     Logger.writeRaw(e.stackTraceToString())
                 }
             }
@@ -384,9 +387,9 @@ class BridgeService : Service() {
             }
         }
 
-      /*  override fun isRooted(): Boolean {
+        override fun isRooted(): Boolean {
             return com.grindrplus.manager.utils.isRooted(applicationContext)
-        }*/
+        }
 
         override fun isLSPosed(): Boolean {
             return com.grindrplus.manager.utils.isLSPosed()

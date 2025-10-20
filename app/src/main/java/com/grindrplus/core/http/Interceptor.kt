@@ -28,11 +28,13 @@ class Interceptor(
     private fun modifyRequest(originalRequest: Request): Request {
         // search for 'getJwt().length() > 0 &&' in userSession
         val isLoggedIn = invokeMethodSafe(userSession, "s") as? Boolean ?: false
+/*
 
         if (!isLoggedIn) {
             PermissionManager.requestExternalStoragePermission(GrindrPlus.context, delayMs = 3000)
             Logger.i("Triggered external storage permission request from Interceptor (user not logged in)", LogSource.HTTP)
         }
+*/
 
 
         val builder: Builder = originalRequest.newBuilder()
