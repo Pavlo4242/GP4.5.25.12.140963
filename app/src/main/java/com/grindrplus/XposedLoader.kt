@@ -17,13 +17,15 @@ class XposedLoader : IXposedHookZygoteInit, IXposedHookLoadPackage {
         modulePath = startupParam.modulePath
     }
 
+
+
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (!lpparam.packageName.contains(GRINDR_PACKAGE_NAME)) return
 
         spoofSignatures(lpparam)
-        if (BuildConfig.DEBUG) {
+        //if (BuildConfig.DEBUG) {
             sslUnpinning(lpparam)
-        }
+        //}
 
         Application::class.java.hook("attach", HookStage.AFTER) {
             val application = it.thisObject()

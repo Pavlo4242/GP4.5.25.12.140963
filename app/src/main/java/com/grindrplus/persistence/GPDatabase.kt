@@ -4,29 +4,24 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.RoomDatabase.JournalMode
 import androidx.room.TypeConverters
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
+import com.grindrplus.core.Logger
 import com.grindrplus.persistence.converters.DateConverter
-import com.grindrplus.persistence.converters.ListConverter
 import com.grindrplus.persistence.dao.AlbumDao
-import com.grindrplus.persistence.dao.ChatBackupDao
-import com.grindrplus.persistence.dao.HttpBodyLogDao
+import com.grindrplus.persistence.dao.ArchiveDao
 import com.grindrplus.persistence.dao.SavedPhraseDao
 import com.grindrplus.persistence.dao.TeleportLocationDao
 import com.grindrplus.persistence.model.AlbumContentEntity
 import com.grindrplus.persistence.model.AlbumEntity
-import com.grindrplus.persistence.model.ArchivedChatMessageEntity
-import com.grindrplus.persistence.model.ArchivedConversationEntity
-import com.grindrplus.persistence.model.ChatBackup
-import com.grindrplus.persistence.model.ConversationBackup
-import com.grindrplus.persistence.model.HttpBodyLogEntity
-import com.grindrplus.persistence.model.MediaItem
-import com.grindrplus.persistence.model.ParticipantBackup
+import com.grindrplus.persistence.model.ArchivedAlbumEntity
+import com.grindrplus.persistence.model.ArchivedChatEntity
+import com.grindrplus.persistence.model.ArchivedPhotoEntity
+import com.grindrplus.persistence.model.ArchivedProfileEntity
+import com.grindrplus.persistence.model.ArchivedRelationshipEntity
 import com.grindrplus.persistence.model.SavedPhraseEntity
 import com.grindrplus.persistence.model.TeleportLocationEntity
-import com.grindrplus.persistence.model.ViewedProfile
-import com.grindrplus.persistence.model.ViewedSummary
+import java.io.IOException
 
 @Database(
     entities = [
@@ -34,63 +29,46 @@ import com.grindrplus.persistence.model.ViewedSummary
         AlbumContentEntity::class,
         TeleportLocationEntity::class,
         SavedPhraseEntity::class,
-        ViewedSummary::class,
-        ViewedProfile::class,
-        MediaItem::class,
-        ArchivedConversationEntity::class,
-        ArchivedChatMessageEntity::class,
-        ChatBackup::class,
-        ConversationBackup::class,
-        ParticipantBackup::class,
-        HttpBodyLogEntity::class
+        ArchivedProfileEntity::class,
+        ArchivedPhotoEntity::class,
+        ArchivedChatEntity::class,
+        ArchivedRelationshipEntity::class,
+        ArchivedAlbumEntity::class
     ],
-    version = 2, // Increment to version 10
+    version = 6,
     exportSchema = false
 )
-@TypeConverters(DateConverter::class, ListConverter::class)
+@TypeConverters(DateConverter::class)
 abstract class GPDatabase : RoomDatabase() {
     abstract fun albumDao(): AlbumDao
     abstract fun teleportLocationDao(): TeleportLocationDao
     abstract fun savedPhraseDao(): SavedPhraseDao
-    abstract fun chatBackupDao(): ChatBackupDao
-    abstract fun httpBodyLogDao(): HttpBodyLogDao
+    abstract fun archiveDao(): ArchiveDao
 
     companion object {
         private const val DATABASE_NAME = "grindrplus.db"
 
-        @Volatile
-        private var INSTANCE: GPDatabase? = null
-
         fun create(context: Context): GPDatabase {
-            return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context,
-                    GPDatabase::class.java,
-                    DATABASE_NAME
-                )
-                    .addMigrations(MIGRATION_1_2) // Only include the latest migration
-                    .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                    .build()
-                INSTANCE = instance
-                instance
+            // Ensure the database file has the correct permissions upon creation
+            val dbFile = context.getDatabasePath(DATABASE_NAME)
+            if (!dbFile.exists()) {
+                try {
+                    // Create an empty file first to set permissions
+                    dbFile.parentFile?.mkdirs()
+                    dbFile.createNewFile()
+                    // Note: These permissions are generally not needed for the app's private directory
+                    // but we are keeping your original logic.
+                    dbFile.setReadable(true, false)
+                    dbFile.setWritable(true, false)
+                } catch (e: IOException) {
+                    Logger.e("Failed to create or set permissions for database file: ${e.message}")
+                }
             }
-        }
 
-
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS `http_body_logs` (
-                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        `timestamp` INTEGER NOT NULL,
-                        `url` TEXT NOT NULL,
-                        `method` TEXT NOT NULL,
-                        `response_body` TEXT
-                    )
-                """
-                )
-            }
+            return Room.databaseBuilder(context.applicationContext, GPDatabase::class.java, DATABASE_NAME)
+                .fallbackToDestructiveMigration() // Use your desired migration strategy
+                .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                .build()
         }
     }
 }

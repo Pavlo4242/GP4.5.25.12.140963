@@ -21,7 +21,7 @@ abstract class BaseStep : Step {
             print("===== COMPLETED: $name =====")
         } catch (e: Exception) {
             print("===== FAILED: $name =====")
-              throw IOException("$name failed: ${e.localizedMessage}")
+            throw IOException("$name failed: ${e.localizedMessage}")
         }
     }
 

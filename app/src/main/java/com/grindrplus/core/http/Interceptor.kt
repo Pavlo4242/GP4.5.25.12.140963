@@ -1,13 +1,16 @@
 package com.grindrplus.core.http
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import com.grindrplus.GrindrPlus
+import com.grindrplus.GrindrPlus.bridgeClient
+import com.grindrplus.GrindrPlus.context
 import com.grindrplus.core.CredentialsLogger
 import com.grindrplus.core.HttpBodyLogger
-//import com.grindrplus.core.HttpLogger
+import com.grindrplus.core.HttpLogger
 import com.grindrplus.core.Logger
 import com.grindrplus.core.LogSource
-import com.grindrplus.manager.utils.PermissionManager
-import de.robv.android.xposed.XposedBridge
+import com.grindrplus.core.PermissionManager
 import okhttp3.Interceptor
 import okhttp3.Protocol
 import okhttp3.Request
@@ -27,15 +30,10 @@ class Interceptor(
 
     private fun modifyRequest(originalRequest: Request): Request {
         // search for 'getJwt().length() > 0 &&' in userSession
-        val isLoggedIn = invokeMethodSafe(userSession, "s") as? Boolean ?: false
-/*
-
+        val isLoggedIn = invokeMethodSafe(userSession, "p") as? Boolean ?: false
         if (!isLoggedIn) {
-            PermissionManager.requestExternalStoragePermission(GrindrPlus.context, delayMs = 3000)
-            Logger.i("Triggered external storage permission request from Interceptor (user not logged in)", LogSource.HTTP)
+            PermissionManager.requestExternalStoragePermission(context, delayMs = 3000)
         }
-*/
-
 
         val builder: Builder = originalRequest.newBuilder()
 
@@ -127,6 +125,7 @@ class Interceptor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
 
@@ -135,7 +134,7 @@ class Interceptor(
             Logger.d("Intercepting request to: ${request.url}", LogSource.HTTP)
             val response= chain.proceed(modifiedRequest)
 
-            //  HttpLogger.log(modifiedRequest, response)
+            HttpLogger.log(modifiedRequest, response)
 
 
 
@@ -146,7 +145,7 @@ class Interceptor(
 
             val responseBody = response.peekBody(Long.MAX_VALUE).string()
             if (response.header("Content-Type")?.contains("application/json") == true) {
-                HttpBodyLogger.log(modifiedRequest.url.toString(), modifiedRequest.method, body = responseBody)
+                HttpBodyLogger.log(modifiedRequest.url.toString(), modifiedRequest.method, responseBody)
             }
 
             return response

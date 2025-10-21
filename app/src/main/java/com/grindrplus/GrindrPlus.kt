@@ -2,7 +2,6 @@ package com.grindrplus
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Application
 import android.app.Application.ActivityLifecycleCallbacks
 import android.content.Context
@@ -14,11 +13,15 @@ import android.os.Looper
 import android.widget.Toast
 import com.grindrplus.bridge.BridgeClient
 import com.grindrplus.core.Config
+import com.grindrplus.core.DatabaseManager
 import com.grindrplus.core.EventManager
+import com.grindrplus.core.HttpBodyLogger
+import com.grindrplus.core.HttpLogger
 import com.grindrplus.core.InstanceManager
 import com.grindrplus.core.Logger
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.TaskScheduler
+import com.grindrplus.core.ToastLogger
 import com.grindrplus.utils.TaskManager
 import com.grindrplus.core.Utils.handleImports
 import com.grindrplus.core.http.Client
@@ -47,9 +50,6 @@ import java.io.File
 import java.io.IOException
 import java.lang.ref.WeakReference
 import kotlin.system.measureTimeMillis
-import androidx.core.net.toUri
-import timber.log.Timber
-
 
 @SuppressLint("StaticFieldLeak")
 object GrindrPlus {
@@ -57,8 +57,9 @@ object GrindrPlus {
         private set
     lateinit var classLoader: ClassLoader
         private set
-    lateinit var database: GPDatabase
-        private set
+    //lateinit var database: GPDatabase
+    val database: GPDatabase by lazy { GPDatabase.create(context) }
+      //  private set
     lateinit var bridgeClient: BridgeClient
         internal set
     lateinit var instanceManager: InstanceManager
@@ -108,15 +109,13 @@ object GrindrPlus {
     val currentActivity: Activity?
         get() = currentActivityRef?.get()
 
-    internal val userAgent = "U7.q" // search for 'grindr3/'
-    internal val hardcodedUserAgent = "grindr3/25.16.0.144399;144399;Free;Android 15;SM-A166P;samsung"
-    internal val userSession = "com.grindrapp.android.usersession.a" // search for 'com.grindrapp.android.storage.UserSessionImpl$1'
+    internal val userAgent = "g7.g" // search for 'grindr3/'
+    internal val userSession = "Ng.f" // search for 'com.grindrapp.android.storage.UserSessionImpl$1'
     private val deviceInfo =
-        "i5.w" // search for 'AdvertisingIdClient.Info("00000000-0000-0000-0000-000000000000", true)'
-    internal val grindrLocationProvider = "Ia.d" // search for 'system settings insufficient for location request, attempting to resolve'
+        "E4.E" // search for 'AdvertisingIdClient.Info("00000000-0000-0000-0000-000000000000", true)'
+    internal val grindrLocationProvider = "F9.d" // search for 'system settings insufficient for location request, attempting to resolve'
     internal val serverDrivenCascadeRepo = "com.grindrapp.android.persistence.repository.ServerDrivenCascadeRepo"
     internal val ageVerificationActivity = "com.grindrapp.android.ageverification.presentation.ui.AgeVerificationActivity"
-    internal val browseExploreActivity = "com.grindrapp.android.ui.browse.BrowseExploreMapActivity"
     internal val serverNotification = "com.grindrapp.android.network.websocket.model.WebSocketNotification\$ServerNotification"
 
     private val ioScope = CoroutineScope(Dispatchers.IO)
@@ -137,11 +136,11 @@ object GrindrPlus {
             return
         }
 
-
         this.context = application
         this.bridgeClient = BridgeClient(context)
-
+        DatabaseManager.initializeDatabaseIfNeeded(context)
         Logger.initialize(context, bridgeClient, true)
+
         Logger.i("Initializing GrindrPlus...", LogSource.MODULE)
 
         checkVersionCodes(versionCodes, versionNames)
@@ -168,7 +167,7 @@ object GrindrPlus {
 
         this.classLoader =
             DexClassLoader(newModule.absolutePath, null, null, context.classLoader)
-        this.database = GPDatabase.create(context)
+       // this.database = GPDatabase.create(context)
         this.hookManager = HookManager()
         this.instanceManager = InstanceManager(classLoader)
         this.packageName = context.packageName
@@ -261,13 +260,6 @@ object GrindrPlus {
                 when {
                     activity.javaClass.name == ageVerificationActivity -> {
                         showAgeVerificationComplianceDialog(activity)
-                    }
-                    activity.javaClass.name == browseExploreActivity -> {
-                        if ((Config.get("maps_api_key", "") as String).isEmpty()) {
-                            if (!bridgeClient.isLSPosed()) {
-                                showMapsApiKeyDialog(activity)
-                            }
-                        }
                     }
                     shouldShowBridgeConnectionError -> {
                         showBridgeConnectionError(activity)
@@ -381,6 +373,9 @@ object GrindrPlus {
     }
 
     fun showToast(duration: Int, message: String, appContext: Context? = null) {
+        // Add this line to log the toast message
+        ToastLogger.log(message)
+
         val useContext = appContext ?: context
         runOnMainThread(useContext) {
             Toast.makeText(useContext, message, duration).show()
@@ -502,7 +497,7 @@ object GrindrPlus {
 
     private fun showAgeVerificationComplianceDialog(activity: Activity) {
         try {
-            val dialog = AlertDialog.Builder(activity)
+            val dialog = android.app.AlertDialog.Builder(activity)
                 .setTitle("Age Verification Required")
                 .setMessage("You are accessing Grindr from the UK where age verification is legally mandated.\n\n" +
                         "LEGAL COMPLIANCE NOTICE:\n" +
@@ -512,7 +507,8 @@ object GrindrPlus {
                         "2. Comply with all UK legal verification processes\n" +
                         "3. Install GrindrPlus only after successful verification through official channels\n\n" +
                         "WARNING:\n" +
-                        "The developers of this module are not responsible for any legal consequences resulting from non-compliance with age verification requirements.")
+                        "Continued use of this module without proper age verification may result in legal consequences. The developers assume no responsibility for violations of age verification laws.\n\n" +
+                        "This module operates in full compliance with legal requirements and does not provide any means to bypass verification systems.")
                 .setPositiveButton("I Understand") { dialog, _ ->
                     activity.finish()
                     dialog.dismiss()
@@ -535,42 +531,6 @@ object GrindrPlus {
             showToast(Toast.LENGTH_LONG,
                 "Age verification required. Please use official Grindr app to verify, then reinstall GrindrPlus.")
             activity.finish()
-        }
-    }
-
-    private fun showMapsApiKeyDialog(context: Context) {
-        try {
-            AlertDialog.Builder(context)
-                .setTitle("Maps API Key Required")
-                .setMessage("Maps functionality requires a Google Maps API key for LSPatch users due to signature validation issues.\n\n" +
-                        "Quick Setup:\n" +
-                        "1. Create a Google Cloud project at console.cloud.google.com\n" +
-                        "2. Enable: Maps SDK for Android, Geocoding API, Maps JavaScript API\n" +
-                        "3. Create API key with NO restrictions\n" +
-                        "4. Add key to GrindrPlus settings\n" +
-                        "5. REINSTALL GrindrPlus (restart won't work)\n\n" +
-                        "Note: Google may request credit card for free tier.")
-                .setPositiveButton("Open Console") { dialog, _ ->
-                    dialog.dismiss()
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            data = "https://console.cloud.google.com/".toUri()
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-
-                        val appContext = context.applicationContext
-                        appContext.startActivity(intent)
-
-                    } catch (e: Exception) {
-                        showToast(Toast.LENGTH_LONG, "Unable to open browser. Please visit console.cloud.google.com manually")
-                    }
-                }
-                .setNegativeButton("Dismiss") { dialog, _ -> dialog.dismiss() }
-                .setIcon(android.R.drawable.ic_dialog_info)
-                .setCancelable(true)
-                .show()
-        } catch (e: Exception) {
-            Logger.e("Maps API key dialog error: ${e.message}")
         }
     }
 
@@ -628,10 +588,7 @@ object GrindrPlus {
 
                             if (profileId.isNotEmpty()) {
                                 myProfileId = profileId
-                                Logger.i(
-                                    "Own user ID fetched and saved: $myProfileId",
-                                    LogSource.MODULE
-                                )
+                                Logger.i("Own user ID fetched and saved: $myProfileId", LogSource.MODULE)
                             } else {
                                 Logger.w("Profile ID field is empty in response", LogSource.MODULE)
                             }
@@ -647,31 +604,6 @@ object GrindrPlus {
             } catch (e: Exception) {
                 Logger.e("Error fetching own user ID: ${e.message}", LogSource.MODULE)
                 Logger.writeRaw(e.stackTraceToString())
-            }
-        }
-    }
-    private fun setupCrashLogging() {
-        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            try {
-                Logger.e("Uncaught exception in thread: ${thread.name}", LogSource.MODULE)
-                Logger.e("Exception: ${throwable.javaClass.simpleName}: ${throwable.message}", LogSource.MODULE)
-                Logger.writeRaw("Thread: ${thread.name} (id=${thread.id})")
-                Logger.writeRaw("Exception: ${throwable.javaClass.name}")
-                Logger.writeRaw("Message: ${throwable.message}")
-                Logger.writeRaw("Stack trace:")
-                Logger.writeRaw(throwable.stackTraceToString())
-
-                throwable.cause?.let { cause ->
-                    Logger.writeRaw("Caused by: ${cause.javaClass.name}: ${cause.message}")
-                    Logger.writeRaw(cause.stackTraceToString())
-                }
-            } catch (e: Exception) {
-                Timber.tag("GrindrPlus").e("Failed to log crash: ${e.message}")
-                Timber.tag("GrindrPlus").e("Original crash: ${throwable.message}")
-            } finally {
-                defaultHandler?.uncaughtException(thread, throwable)
             }
         }
     }

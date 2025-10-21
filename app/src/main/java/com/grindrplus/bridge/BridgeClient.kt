@@ -9,7 +9,6 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
-import android.os.Process
 import com.grindrplus.BuildConfig
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.Logger
@@ -24,6 +23,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -94,6 +94,25 @@ class BridgeClient(private val context: Context) {
                 }
             }
             serviceWatchdog.postDelayed(this, WATCHDOG_CHECK_INTERVAL_MS)
+        }
+    }
+
+    fun getHttpDbFile(): File? {
+        if (!isBound.get()) {
+            if (connectBlocking(3000)) {
+                Logger.d("Connected to service on-demand for getDbFile", LogSource.BRIDGE)
+            } else {
+                Logger.w("Cannot get DB file, service not bound", LogSource.BRIDGE)
+                return null
+            }
+        }
+
+        return try {
+            val filePath = bridgeService?.getHttpDbFilePath()
+            filePath?.let { File(it) }
+        } catch (e: Exception) {
+            Logger.e("Error getting DB file: ${e.message}", LogSource.BRIDGE)
+            null
         }
     }
 
@@ -379,14 +398,12 @@ class BridgeClient(private val context: Context) {
         }
 
         return try {
-            val configStr = bridgeService?.getConfig() ?: "{}"
-            JSONObject(configStr)
+            bridgeService?.config?.let { JSONObject(it) } ?: JSONObject()
         } catch (e: Exception) {
             Logger.e("Error getting config: ${e.message}", LogSource.BRIDGE)
             JSONObject()
         }
     }
-
 
     fun setConfig(config: JSONObject) {
         if (!isBound.get()) {
@@ -433,8 +450,7 @@ class BridgeClient(private val context: Context) {
         }
 
         return try {
-            val eventsStr = bridgeService?.getBlockEvents() ?: "[]"
-            JSONArray(eventsStr)
+            bridgeService?.blockEvents?.let { JSONArray(it) } ?: JSONArray()
         } catch (e: Exception) {
             Logger.e("Error getting block events: ${e.message}", LogSource.BRIDGE)
             JSONArray()
@@ -455,6 +471,21 @@ class BridgeClient(private val context: Context) {
             bridgeService?.clearBlockEvents()
         } catch (e: Exception) {
             Logger.e("Error clearing block events: ${e.message}", LogSource.BRIDGE)
+        }
+    }
+
+    fun writeCredentialsLog(content: String) {
+        if (!isBound.get()) {
+            if (!connectBlocking(1000)) { // Short timeout, non-critical
+                Logger.w("Cannot write credentials log, service not bound", LogSource.BRIDGE)
+                return
+            }
+        }
+
+        try {
+            bridgeService?.writeCredentialsLog(content)
+        } catch (e: Exception) {
+            Logger.e("Error writing credentials log: ${e.message}", LogSource.BRIDGE)
         }
     }
 
@@ -526,7 +557,12 @@ class BridgeClient(private val context: Context) {
         }
     }
 
-    fun shouldRegenAndroidId(packageName: String): Boolean {
+    fun shouldRegenAndroidId(packageName: String?): Boolean {
+        if (packageName == null) {
+            Logger.w("shouldRegenAndroidId called with null packageName", LogSource.BRIDGE)
+            return false
+        }
+
         if (!isBound.get()) {
             if (connectBlocking(3000)) {
                 Logger.d(
@@ -582,42 +618,6 @@ class BridgeClient(private val context: Context) {
             bridgeService?.deleteForcedLocation(packageName)
         } catch (e: Exception) {
             Logger.e("Error deleting forced location: ${e.message}", LogSource.BRIDGE)
-        }
-    }
-
-    /* fun isRooted(): Boolean {
-         if (!isBound.get()) {
-             if (connectBlocking(3000)) {
-                 Logger.d("Connected to service on-demand for isRooted", LogSource.BRIDGE)
-             } else {
-                 Logger.w("Cannot check root status, service not bound", LogSource.BRIDGE)
-                 return false
-             }
-         }
-
-         return try {
-             bridgeService?.isRooted ?: false
-         } catch (e: Exception) {
-             Logger.e("Error checking root status: ${e.message}", LogSource.BRIDGE)
-             false
-         }
-     }*/
-
-    fun isLSPosed(): Boolean {
-        if (!isBound.get()) {
-            if (connectBlocking(3000)) {
-                Logger.d("Connected to service on-demand for isLSPosed", LogSource.BRIDGE)
-            } else {
-                Logger.w("Cannot check LSPosed status, service not bound", LogSource.BRIDGE)
-                return false
-            }
-        }
-
-        return try {
-            bridgeService?.isLSPosed ?: false
-        } catch (e: Exception) {
-            Logger.e("Error checking LSPosed status: ${e.message}", LogSource.BRIDGE)
-            false
         }
     }
 }

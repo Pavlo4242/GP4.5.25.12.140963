@@ -74,6 +74,18 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // Existing/Previous Fix: Exclude coroutines service file
+
+
+            // NEW: Exclusions to prevent NoClassDefFoundError/ExceptionInInitializerError
+            // from transitive dependencies (like Room/Okio/AndroidX core libraries)
+            excludes += "META-INF/licenses/**"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/versions/**"
+            excludes += "kotlin/jvm/internal/DefaultConstructorMarker.class"
+            // This is a known common conflict with modern Room/Coroutines dependencies
+            excludes += "j$/util/concurrent/ConcurrentHashMap.class"
+
         }
     }
 
@@ -106,6 +118,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     compileOnly(fileTree("libs") { include("*.jar") })
     implementation(fileTree("libs") { include("lspatch.jar") })
+
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.android)
 
     val composeBom = platform("androidx.compose:compose-bom:2025.02.00")
     implementation(composeBom)
@@ -177,7 +192,7 @@ tasks.register("setupLSPatch") {
         exec {
             commandLine = listOf("zip", "-d", "./libs/lspatch.jar", "com/google/errorprone/annotations/*")
         }
-       /* exec {
+     /*  exec {
             commandLine = listOf(
                 "zip",
                 "-d",

@@ -102,7 +102,7 @@ class FeatureGranting : Hook(
         featureManager.add(Feature("InboxNativeAds", false))
         featureManager.add(Feature("ReportingLagTime", false))
         featureManager.add(Feature("MrecNewFlow", false))
-        //featureManager.add(Feature("RunningOnEmulatorFeatureFlag", false))
+        featureManager.add(Feature("RunningOnEmulatorFeatureFlag", false))
         featureManager.add(Feature("BannerNewFlow", false))
         featureManager.add(Feature("CalendarUi", true))
         featureManager.add(Feature("CookieTap", Config.get("enable_cookie_tap", false, true) as Boolean))

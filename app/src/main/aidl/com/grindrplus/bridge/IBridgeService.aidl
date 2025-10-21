@@ -6,40 +6,17 @@ interface IBridgeService {
     void log(String level, String source, String message, String hookName);
     void writeRawLog(String content);
     void clearLogs();
-
-    void sendNotification(
-        String title,
-        String message,
-        int notificationId,
-        String channelId,
-        String channelName,
-        String channelDescription
-    );
-
-    void sendNotificationWithActions(
-        String title,
-        String message,
-        int notificationId,
-        String channelId,
-        String channelName,
-        String channelDescription,
-        in String[] actionLabels,
-        in String[] actionIntents,
-        in String[] actionData
-    );
-
-    void logBlockEvent(
-        String profileId,
-        String displayName,
-        boolean isBlock,
-        String packageName
-    );
-
-    String getBlockEvents();
-    void clearBlockEvents();
-    boolean shouldRegenAndroidId(String packageName);
+    String getHttpDbFilePath();
+    void writeCredentialsLog(String content);
+    boolean shouldRegenAndroidId(in String packageName);
     String getForcedLocation(String packageName);
     void deleteForcedLocation(String packageName);
-    boolean isRooted();
-    boolean isLSPosed();
+    void logBlockEvent(String profileId, String displayName, boolean isBlock, String packageName);
+    String getBlockEvents();
+    void clearBlockEvents();
+    void sendNotification(String title, String message, int notificationId, String channelId, String channelName, String channelDescription);
+    void sendNotificationWithActions(String title, String message, int notificationId, String channelId,
+                                    String channelName, String channelDescription,
+                                    in String[] actionLabels, in String[] actionIntents, in String[] actionData);
+
 }
