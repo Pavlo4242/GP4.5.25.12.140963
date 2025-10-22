@@ -11,6 +11,7 @@ import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.hook
 import com.grindrplus.utils.hookConstructor
 import java.io.File
+import com.grindrplus.XposedLoader
 
 class ComprehensiveAntiDetection : Hook(
     "Comprehensive Anti Detection",
@@ -32,36 +33,36 @@ class ComprehensiveAntiDetection : Hook(
         if (Config.get("sub_hook_comprehensive_activity_finish", true) as Boolean) {
             hookActivityLifecycle()
         }
-
-        if (Config.get("sub_hook_comprehensive_filesystem", true) as Boolean) {
-            hookFileSystem()
-        }
-
-        if (Config.get("sub_hook_comprehensive_build_props", true) as Boolean) {
-            hookBuildProperties()
-        }
-
-        if (Config.get("sub_hook_comprehensive_pkg_mgr", true) as Boolean) {
-            hookPackageManager()
-        }
-
-        if (Config.get("sub_hook_comprehensive_native_libs", true) as Boolean) {
-            hookRuntimeLibraries()
-        }
-
-        if (Config.get("sub_hook_comprehensive_play_integrity", true) as Boolean) {
-            hookPlayIntegrity()
-        }
+//
+//        if (com.grindrplus.core.Config.get("sub_hook_comprehensive_filesystem", true) as Boolean) {
+//            hookFileSystemAccess()
+//        }
+//
+//        if (Config.get("sub_hook_comprehensive_build_props", true) as Boolean) {
+//            hookBuildProperties()
+//        }
+//
+//        if (Config.get("sub_hook_comprehensive_pkg_mgr", true) as Boolean) {
+//            hookPackageManager()
+//        }
+//
+//        if (Config.get("sub_hook_comprehensive_native_libs", true) as Boolean) {
+//            hookRuntimeLibraries()
+//        }
+//
+//        if (Config.get("sub_hook_comprehensive_play_integrity", true) as Boolean) {
+//            hookPlayIntegrity()
+//        }
 
         // Always install these core hooks
         hookGrindrDetection()
         hookFirebaseChecks()
         hookSiftScience()
-        hookSystemProperties()
+  //      hookSystemProperties()
         hookStackTraceDetection()
         hookDebugDetection()
         hookSignatureVerification()
-        hookNativeDetection()
+ //       hookNativeDetection()
 
         Logger.s("Comprehensive Anti-Detection initialized", LogSource.MODULE)
     }

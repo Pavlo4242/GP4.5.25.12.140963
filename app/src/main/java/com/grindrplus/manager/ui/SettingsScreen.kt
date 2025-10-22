@@ -1,6 +1,8 @@
 package com.grindrplus.manager.ui
 
 import android.content.Intent
+import android.os.Process
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -61,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.net.toUri
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.grindrplus.core.Config
 import com.grindrplus.manager.settings.ApiKeyTestDialog
 import com.grindrplus.manager.settings.ButtonSetting
@@ -71,19 +75,19 @@ import com.grindrplus.manager.settings.SettingsViewModel
 import com.grindrplus.manager.settings.SwitchSetting
 import com.grindrplus.manager.settings.TextSetting
 import com.grindrplus.manager.settings.TextSettingWithButtons
-import com.grindrplus.manager.settings.rememberViewModel
 import com.grindrplus.manager.ui.components.PackageSelector
 import com.grindrplus.manager.utils.FileOperationHandler
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 
-
-
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable
+@Composable // Added annotation
 fun SettingsScreen(
-    viewModel: SettingsViewModel = rememberViewModel(),
+    viewModel: SettingsViewModel = viewModel(
+        factory = SettingsViewModel.SettingsViewModelFactory(LocalContext.current.applicationContext)
+    )
+    // Add navController or other parameters as needed
 ) {
     var showHooksScreen by remember { mutableStateOf(false) }
     val isLoading by viewModel.isLoading.collectAsState()
@@ -100,6 +104,7 @@ fun SettingsScreen(
     val apiKeyTestMessage by viewModel.apiKeyTestMessage.collectAsState()
     val apiKeyTestRawResponse by viewModel.apiKeyTestRawResponse.collectAsState()
     val apiKeyTestLoading by viewModel.apiKeyTestLoading.collectAsState()
+
 
     if (showHooksScreen) {
         HooksSettingsScreen(
@@ -138,7 +143,7 @@ fun SettingsScreen(
                     val intent = packageManager.getLaunchIntentForPackage(context.packageName)
                     intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     context.startActivity(intent)
-                    android.os.Process.killProcess(android.os.Process.myPid())
+                    Process.killProcess(Process.myPid())
                 }
             }
         )
@@ -220,6 +225,22 @@ fun SettingsScreen(
                                             snackbarHostState.showSnackbar("Failed to import settings: ${e.message}")
                                         }
                                     }
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Force UI Update") },
+                                onClick = {
+                                    viewModel.loadSettings()
+                                    // Optionally: viewModel.loadHookCategories() if needed
+                                    expanded = false // *** FIXED: Use 'expanded' here ***
+                                    Toast.makeText(context, "Settings refreshed", Toast.LENGTH_SHORT).show()
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Filled.Refresh, // *** FIXED: Use Icons.Filled.Refresh ***
+                                        contentDescription = "Refresh Settings"
+                                    )
                                 }
                             )
 
