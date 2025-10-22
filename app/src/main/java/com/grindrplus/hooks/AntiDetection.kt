@@ -16,6 +16,42 @@ class AntiDetection : Hook(
     private val osData = "com.google.firebase.crashlytics.internal.model.AutoValue_StaticSessionData_OsData"
 
     override fun init() {
+        val rootDetectionEnabled = Config.get("sub_hook_anti_detection_root", true) as Boolean
+        val emulatorDetectionEnabled = Config.get("sub_hook_anti_detection_emulator", true) as Boolean
+        val siftScienceEnabled = Config.get("sub_hook_anti_detection_sift", true) as Boolean
+
+        if (rootDetectionEnabled || emulatorDetectionEnabled) {
+            findClass(grindrMiscClass)
+                .hook("M", HookStage.AFTER) { param ->
+                    param.setResult(false)
+                }
+        }
+
+        if (rootDetectionEnabled) {
+            findClass(commonUtils)
+                .hook("isRooted", HookStage.BEFORE) { param ->
+                    param.setResult(false)
+                }
+        }
+
+        if (emulatorDetectionEnabled) {
+            findClass(commonUtils)
+                .hook("isEmulator", HookStage.BEFORE) { param ->
+                    param.setResult(false)
+                }
+
+            findClass(commonUtils)
+                .hook("isAppDebuggable", HookStage.BEFORE) { param ->
+                    param.setResult(false)
+                }
+        }
+
+        if (siftScienceEnabled) {
+            findClass(devicePropertiesCollector)
+                .hook("existingRWPaths", HookStage.BEFORE) { param ->
+                    param.setResult(false)
+                }
+
         findClass(grindrMiscClass)
             .hook("M", HookStage.AFTER) { param ->
                 param.setResult(false)

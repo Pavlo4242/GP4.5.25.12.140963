@@ -3,6 +3,7 @@ package com.grindrplus.hooks
 import android.app.Activity
 import android.content.Context
 import android.os.Build
+import com.grindrplus.core.Config
 import com.grindrplus.core.Logger
 import com.grindrplus.core.LogSource
 import com.grindrplus.utils.Hook
@@ -21,19 +22,46 @@ class ComprehensiveAntiDetection : Hook(
     private val commonUtils = "com.google.firebase.crashlytics.internal.common.CommonUtils"
     private val osData = "com.google.firebase.crashlytics.internal.model.AutoValue_StaticSessionData_OsData"
 
+// In CompAntiDetection.kt (ComprehensiveAntiDetection class)
+// Update the init() method to check sub-hook toggles:
+
     override fun init() {
         Logger.i("Initializing Comprehensive Anti-Detection...", LogSource.MODULE)
 
-        // Core detection hooks
+        // Check each sub-hook before installing
+        if (Config.get("sub_hook_comprehensive_activity_finish", true) as Boolean) {
+            hookActivityLifecycle()
+        }
+
+        if (Config.get("sub_hook_comprehensive_filesystem", true) as Boolean) {
+            hookFileSystem()
+        }
+
+        if (Config.get("sub_hook_comprehensive_build_props", true) as Boolean) {
+            hookBuildProperties()
+        }
+
+        if (Config.get("sub_hook_comprehensive_pkg_mgr", true) as Boolean) {
+            hookPackageManager()
+        }
+
+        if (Config.get("sub_hook_comprehensive_native_libs", true) as Boolean) {
+            hookRuntimeLibraries()
+        }
+
+        if (Config.get("sub_hook_comprehensive_play_integrity", true) as Boolean) {
+            hookPlayIntegrity()
+        }
+
+        // Always install these core hooks
         hookGrindrDetection()
         hookFirebaseChecks()
         hookSiftScience()
-        hookActivityLifecycle()
-        hookFileSystemAccess()
-        hookBuildProperties()
+        hookSystemProperties()
         hookStackTraceDetection()
         hookDebugDetection()
         hookSignatureVerification()
+        hookNativeDetection()
 
         Logger.s("Comprehensive Anti-Detection initialized", LogSource.MODULE)
     }
