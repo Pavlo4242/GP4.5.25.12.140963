@@ -77,7 +77,7 @@ import com.grindrplus.manager.utils.FileOperationHandler
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-var showHooksScreen by remember { mutableStateOf(false) }
+
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -85,6 +85,7 @@ var showHooksScreen by remember { mutableStateOf(false) }
 fun SettingsScreen(
     viewModel: SettingsViewModel = rememberViewModel(),
 ) {
+    var showHooksScreen by remember { mutableStateOf(false) }
     val isLoading by viewModel.isLoading.collectAsState()
     val settingGroups by viewModel.settingGroups.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
