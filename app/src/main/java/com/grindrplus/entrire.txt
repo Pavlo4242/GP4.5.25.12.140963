@@ -29,7 +29,7 @@ import com.grindrplus.core.Utils.handleImports
 import com.grindrplus.core.http.Client
 import com.grindrplus.core.http.Interceptor
 import com.grindrplus.persistence.GPDatabase
-import com.grindrplus.utils.HookManager
+import com.grindrplus.utils.OldHookManager
 import com.grindrplus.utils.PCHIP
 import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.hookConstructor
@@ -9584,7 +9584,7 @@ import com.grindrplus.manager.ui.InstallPage
 import com.grindrplus.manager.ui.SettingsScreen
 import com.grindrplus.manager.ui.theme.GrindrPlusTheme
 import com.grindrplus.manager.utils.FileOperationHandler
-import com.grindrplus.utils.HookManager
+import com.grindrplus.utils.OldHookManager
 import com.grindrplus.utils.TaskManager
 import com.onebusaway.plausible.android.AndroidResourcePlausibleConfig
 import com.onebusaway.plausible.android.NetworkFirstPlausibleClient
@@ -19981,7 +19981,7 @@ fun Array<Method>.hookAll(stage: HookStage, param: (HookAdapter<Any>) -> Unit) {
         it.hook(stage, param)
     }
 } 
---- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\140963\app\src\main\java\com\grindrplus\utils\HookManager.kt --- 
+--- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\140963\app\src\main\java\com\grindrplus\utils\OldHookManager.kt ---
 package com.grindrplus.utils
 
 import com.grindrplus.core.Config

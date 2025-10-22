@@ -15,8 +15,6 @@ import com.grindrplus.bridge.BridgeClient
 import com.grindrplus.core.Config
 import com.grindrplus.core.DatabaseManager
 import com.grindrplus.core.EventManager
-import com.grindrplus.core.HttpBodyLogger
-import com.grindrplus.core.HttpLogger
 import com.grindrplus.core.InstanceManager
 import com.grindrplus.core.Logger
 import com.grindrplus.core.LogSource
@@ -32,7 +30,6 @@ import com.grindrplus.utils.PCHIP
 import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.hookConstructor
 import dalvik.system.DexClassLoader
-import de.robv.android.xposed.XposedHelpers.getObjectField
 import de.robv.android.xposed.XposedHelpers.callMethod
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
