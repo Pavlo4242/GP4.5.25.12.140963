@@ -14,6 +14,7 @@ class CommandHandler(
         commandModules.add(Profile(recipient, sender))
         commandModules.add(Utils(recipient, sender))
         commandModules.add(Database(recipient, sender))
+        commandModules.add(Filtering(recipient, sender))
     }
 
     fun handle(input: String) {
