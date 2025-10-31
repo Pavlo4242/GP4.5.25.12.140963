@@ -147,8 +147,8 @@ class UnlimitedProfiles : Hook(
                 // Filter 1: Maximum Distance
                 val maxDistance = Config.get("filter_max_distance", 0) as Int
                 if (maxDistance > 0) {
-                    val distanceMeters = getObjectField(profileData, "distanceMeters") as? Int
-                        ?: getObjectField(profileData, "distance") as? Double?.let { (it * 1000).toInt() }
+                    val distanceMeters = (getObjectField(profileData, "distanceMeters") as? Int)
+                        ?: (getObjectField(profileData, "distance") as? Double)?.let { (it * 1000).toInt() }
                     if (distanceMeters != null && distanceMeters > maxDistance) {
                         return@filter false
                     }
