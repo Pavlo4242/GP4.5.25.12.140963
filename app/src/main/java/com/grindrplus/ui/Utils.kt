@@ -3,6 +3,7 @@ package com.grindrplus.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.widget.Toast
 import com.grindrplus.GrindrPlus
@@ -26,15 +27,44 @@ object Utils {
         }
     }
 
+
     fun copyToClipboard(label: String, text: String) {
         val clipboard = GrindrPlus.context.getSystemService(ClipboardManager::class.java)
         clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
         GrindrPlus.showToast(Toast.LENGTH_LONG, "$label copied to clipboard.")
     }
 
+
+    fun copyTo(label: String, text: String) {
+        try {
+            GrindrPlus.runOnMainThreadWithCurrentActivity { activity ->
+                try {
+                    val clipboard =
+                        activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText(label, text)
+                    clipboard.setPrimaryClip(clip)
+                    GrindrPlus.showToast(
+                        android.widget.Toast.LENGTH_SHORT,
+                        "Copied to clipboard"
+                    )
+                } catch (e: Exception) {
+                    GrindrPlus.showToast(
+                        android.widget.Toast.LENGTH_LONG,
+                        "Copy failed: ${e.message}"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            GrindrPlus.showToast(android.widget.Toast.LENGTH_LONG, "Copy failed: ${e.message}")
+        }
+    }
+
     fun formatEpochSeconds(epochSec: Long): String {
-        val formatter = DateTimeFormatter.ofPattern(Config.get(
-            "date_format", "yyyy-MM-dd") as String)
+        val formatter = DateTimeFormatter.ofPattern(
+            Config.get(
+                "date_format", "yyyy-MM-dd"
+            ) as String
+        )
         return try {
             val instant = Instant.ofEpochSecond(epochSec)
             val dt = LocalDateTime.ofInstant(instant, ZoneOffset.UTC)

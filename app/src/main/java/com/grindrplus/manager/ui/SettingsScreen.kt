@@ -1,8 +1,6 @@
 package com.grindrplus.manager.ui
 
 import android.content.Intent
-import android.os.Process
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +23,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -48,6 +45,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,32 +62,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.net.toUri
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.grindrplus.core.Config
 import com.grindrplus.manager.settings.ApiKeyTestDialog
 import com.grindrplus.manager.settings.ButtonSetting
 import com.grindrplus.manager.settings.KeyboardType
+import com.grindrplus.manager.settings.LocationListSetting
 import com.grindrplus.manager.settings.Setting
 import com.grindrplus.manager.settings.SettingGroup
 import com.grindrplus.manager.settings.SettingsViewModel
 import com.grindrplus.manager.settings.SwitchSetting
 import com.grindrplus.manager.settings.TextSetting
 import com.grindrplus.manager.settings.TextSettingWithButtons
+import com.grindrplus.manager.settings.rememberViewModel
 import com.grindrplus.manager.ui.components.PackageSelector
 import com.grindrplus.manager.utils.FileOperationHandler
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable // Added annotation
+@Composable
 fun SettingsScreen(
-    viewModel: SettingsViewModel = viewModel(
-        factory = SettingsViewModel.SettingsViewModelFactory(LocalContext.current.applicationContext)
-    )
-    // Add navController or other parameters as needed
+    viewModel: SettingsViewModel = rememberViewModel(),
 ) {
-    var showHooksScreen by remember { mutableStateOf(false) }
     val isLoading by viewModel.isLoading.collectAsState()
     val settingGroups by viewModel.settingGroups.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -105,16 +99,6 @@ fun SettingsScreen(
     val apiKeyTestRawResponse by viewModel.apiKeyTestRawResponse.collectAsState()
     val apiKeyTestLoading by viewModel.apiKeyTestLoading.collectAsState()
 
-
-    if (showHooksScreen) {
-        HooksSettingsScreen(
-            onBack = {
-                showHooksScreen = false
-                viewModel.loadSettings() // Reload main settings
-            }
-        )
-        return
-    }
     if (debugLogsScreen) {
         DebugLogsScreen(
             onBack = { debugLogsScreen = false },
@@ -143,7 +127,7 @@ fun SettingsScreen(
                     val intent = packageManager.getLaunchIntentForPackage(context.packageName)
                     intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     context.startActivity(intent)
-                    Process.killProcess(Process.myPid())
+                    android.os.Process.killProcess(android.os.Process.myPid())
                 }
             }
         )
@@ -229,22 +213,6 @@ fun SettingsScreen(
                             )
 
                             DropdownMenuItem(
-                                text = { Text("Force UI Update") },
-                                onClick = {
-                                    viewModel.loadSettings()
-                                    // Optionally: viewModel.loadHookCategories() if needed
-                                    expanded = false // *** FIXED: Use 'expanded' here ***
-                                    Toast.makeText(context, "Settings refreshed", Toast.LENGTH_SHORT).show()
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Filled.Refresh, // *** FIXED: Use Icons.Filled.Refresh ***
-                                        contentDescription = "Refresh Settings"
-                                    )
-                                }
-                            )
-
-                            DropdownMenuItem(
                                 text = { Text("Reset settings") },
                                 onClick = {
                                     expanded = false
@@ -290,46 +258,6 @@ fun SettingsScreen(
                     bottom = 100.dp
                 )
             ) {
-                item {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = MaterialTheme.shapes.medium,
-                        tonalElevation = 2.dp,
-                        onClick = {
-                            viewModel.loadHookCategories()
-                            showHooksScreen = true
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "🎛️ Advanced Hook Settings",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                Text(
-                                    text = "Configure hooks by category with fine-grained control",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
-
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = "Open hooks settings",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                }
                 item {
                     PackageSelector(
                         onPackageSelected = { packageName ->
@@ -598,6 +526,141 @@ fun ImprovedSettingItem(
         is TextSetting -> ImprovedTextSetting(setting) { onSettingChanged() }
         is TextSettingWithButtons -> ImprovedTextSettingWithButtons(setting) { onSettingChanged() }
         is ButtonSetting -> ImprovedButtonSetting(setting)
+        is com.grindrplus.manager.settings.LocationListSetting -> ImprovedLocationListSetting(setting) { onSettingChanged() }
+        else -> {}
+    }
+}
+@Composable
+fun ImprovedLocationListSetting(
+    setting: com.grindrplus.manager.settings.LocationListSetting,
+    onChanged: () -> Unit,
+) {
+    var isExpanded by remember { mutableStateOf(false) }
+    var currentLocations by remember { mutableStateOf(setting.locations) }
+
+    // This is important to update the local state when the underlying data changes (e.g., after save).
+    LaunchedEffect(setting.locations) {
+        currentLocations = setting.locations
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.small)
+                .clickable { isExpanded = !isExpanded },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = setting.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                setting.description?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+            IconButton(onClick = { isExpanded = !isExpanded }) {
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = "Edit setting",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.rotate(if (isExpanded) 90f else 0f)
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = isExpanded) {
+            Column(
+                modifier = Modifier.padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                currentLocations.forEachIndexed { index, location ->
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = location.name,
+                            onValueChange = { newName ->
+                                val newList = currentLocations.toMutableList()
+                                newList[index] = location.copy(name = newName)
+                                currentLocations = newList
+                            },
+                            label = { Text("Name ${index + 1}") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = location.lat,
+                                onValueChange = { newLat ->
+                                    val newList = currentLocations.toMutableList()
+                                    newList[index] = location.copy(lat = newLat)
+                                    currentLocations = newList
+                                },
+                                label = { Text("Latitude") },
+                                modifier = Modifier.weight(1f),
+                                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = location.lon,
+                                onValueChange = { newLon ->
+                                    val newList = currentLocations.toMutableList()
+                                    newList[index] = location.copy(lon = newLon)
+                                    currentLocations = newList
+                                },
+                                label = { Text("Longitude") },
+                                modifier = Modifier.weight(1f),
+                                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                singleLine = true
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Button(
+                        onClick = {
+                            isExpanded = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = {
+                            setting.onLocationsChange(currentLocations)
+                            onChanged()
+                            isExpanded = false
+                        },
+                    ) {
+                        Text("Save")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -613,6 +676,8 @@ fun ImprovedSwitchSetting(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
+
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = setting.title,

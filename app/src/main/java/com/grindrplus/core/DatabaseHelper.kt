@@ -79,4 +79,38 @@ object DatabaseHelper {
         database.execSQL(sql)
         database.close()
     }
+
+    fun getRecentDeletions(limit: Int = 50): List<Map<String, Any>> {
+        return query("""
+        SELECT 
+            id,
+            original_table_name,
+            datetime(deleted_at, 'unixepoch') as deleted_time,
+            row_primary_key,
+            delete_trigger,
+            substr(row_data, 1, 100) as data_preview
+        FROM universal_deleted_data 
+        ORDER BY deleted_at DESC 
+        LIMIT $limit
+    """, emptyArray())
+    }
+
+    fun getDeletionStats(): List<Map<String, Any>> {
+        return query("""
+        SELECT 
+            original_table_name,
+            COUNT(*) as deletion_count,
+            datetime(MAX(deleted_at), 'unixepoch') as latest_deletion
+        FROM universal_deleted_data 
+        GROUP BY original_table_name 
+        ORDER BY deletion_count DESC
+    """, emptyArray())
+    }
+
+    fun clearOldDeletions(daysToKeep: Int = 30) {
+        execute("""
+        DELETE FROM universal_deleted_data 
+        WHERE deleted_at < strftime('%s','now') - (${daysToKeep} * 24 * 60 * 60)
+    """)
+    }
 }

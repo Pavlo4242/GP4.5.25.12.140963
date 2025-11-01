@@ -74,24 +74,6 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // Existing/Previous Fix: Exclude coroutines service file
-
-
-            // NEW: Exclusions to prevent NoClassDefFoundError/ExceptionInInitializerError
-            // from transitive dependencies (like Room/Okio/AndroidX core libraries)
-            excludes += "META-INF/licenses/**"
-            excludes += "META-INF/INDEX.LIST"
-            excludes += "META-INF/versions/**"
-            excludes += "kotlin/jvm/internal/DefaultConstructorMarker.class"
-            // This is a known common conflict with modern Room/Coroutines dependencies
-            excludes += "j$/util/concurrent/ConcurrentHashMap.class"
-
-        }
-    }
-
-    sourceSets {
-        getByName("main") {
-            aidl.srcDirs("src/main/aidl")
         }
     }
 
@@ -99,7 +81,7 @@ android {
         outputs.configureEach {
             val sanitizedVersionName = versionName.replace(Regex("[^a-zA-Z0-9._-]"), "_").trim('_')
             (this as BaseVariantOutputImpl).outputFileName =
-                "12.140963_v${sanitizedVersionName}-${name}.apk"
+                "GPlus_v${sanitizedVersionName}-${name}.apk"
         }
     }
 }
@@ -107,7 +89,6 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.coordinatorlayout)
     implementation(libs.material)
@@ -119,9 +100,6 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     compileOnly(fileTree("libs") { include("*.jar") })
     implementation(fileTree("libs") { include("lspatch.jar") })
-
-    implementation(libs.kotlinx.coroutines.core)
-    implementation(libs.kotlinx.coroutines.android)
 
     val composeBom = platform("androidx.compose:compose-bom:2025.02.00")
     implementation(composeBom)
@@ -192,14 +170,6 @@ tasks.register("setupLSPatch") {
 
         exec {
             commandLine = listOf("zip", "-d", "./libs/lspatch.jar", "com/google/errorprone/annotations/*")
-        }
-        exec {
-            commandLine = listOf(
-                "zip",
-                "-d",
-                "./libs/lspatch.jar",
-                "META-INF/services/kotlinx.coroutines.CoroutineExceptionHandler"
-            )
         }
     }
 }

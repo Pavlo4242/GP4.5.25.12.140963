@@ -25,6 +25,17 @@ data class ButtonAction(
     val action: () -> Unit
 )
 
+data class LocationData(val name: String, val lat: String, val lon: String)
+
+data class LocationListSetting(
+    override val id: String,
+    override val title: String,
+    val description: String? = null,
+    val locations: List<LocationData>,
+    val onLocationsChange: (List<LocationData>) -> Unit
+) : Setting(id, title)
+
+
 data class TextSettingWithButtons(
     override val id: String,
     override val title: String,

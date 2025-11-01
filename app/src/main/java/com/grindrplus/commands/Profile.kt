@@ -17,6 +17,7 @@ class Profile(
     recipient: String,
     sender: String
 ) : CommandModule("Profile", recipient, sender) {
+
     @Command("open", help = "Open a user's profile")
     fun open(args: List<String>) {
         if (args.isNotEmpty()) {
@@ -214,59 +215,69 @@ class Profile(
     @SuppressLint("SetTextI18n")
     @Command("id", help = "Get and copy profile IDs")
     fun id(args: List<String>) {
-        val accountCreationTime = formatEpochSeconds(
-            GrindrPlus.spline.invert(sender.toDouble()).toLong())
+        val accountCreationTime = try {
+            formatEpochSeconds(GrindrPlus.spline.invert(sender.toDouble()).toLong())
+        } catch (e: Exception) {
+            "Unknown"
+        }
 
+        // Ensure we're on the main thread for UI operations
         GrindrPlus.runOnMainThreadWithCurrentActivity { activity ->
-            val dialogView = LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(60, 0, 60, 0)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-
-            val textView = activity.let {
-                AppCompatTextView(it).apply {
-                    text = "• Your ID: $recipient\n• Profile ID: $sender\n• Estimated creation: $accountCreationTime"
-                    textSize = 18f
+            try {
+                val dialogView = LinearLayout(activity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(60, 40, 60, 40)
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     )
                 }
-            }
 
-            dialogView.addView(textView)
+                val textView = AppCompatTextView(activity).apply {
+                    text = "• Your ID: $recipient\n• Profile ID: $sender\n• Estimated creation: $accountCreationTime"
+                    textSize = 18f
+                    setTextColor(Color.WHITE)
+                    setPadding(20, 20, 20, 20)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                }
 
-            AlertDialog.Builder(activity)
-                .setTitle("Profile IDs")
-                .setView(dialogView)
-                .setPositiveButton("Copy my ID") { _, _ ->
-                    copyToClipboard("Your ID", recipient)
-                }
-                .setNegativeButton("Copy profile ID") { _, _ ->
-                    copyToClipboard("Profile ID", sender)
-                }
-                .setNeutralButton("Close") { dialog, _ ->
+                dialogView.addView(textView)
+
+                val dialog = AlertDialog.Builder(activity)
+                    .setTitle("Profile IDs")
+                    .setView(dialogView)
+                    .setPositiveButton("Copy my ID") { _, _ ->
+                        copyToClipboard("Your ID", recipient)
+                    }
+                    .setNegativeButton("Copy profile ID") { _, _ ->
+                        copyToClipboard("Profile ID", sender)
+                    }
+                    .setNeutralButton("Close") { dialog, _ ->
+                        dialog.dismiss()
+                    }
+                    .create()
+
+                dialog.show()
+
+                // Set long click listeners after dialog is shown
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnLongClickListener {
+                    copyToClipboard("Your ID", " $recipient")
                     dialog.dismiss()
+                    true
                 }
-                .create()
-                .also { alertDialog ->
-                    alertDialog.show()
-                    alertDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnLongClickListener {
-                        copyToClipboard("Your ID", " $recipient")
-                        alertDialog.dismiss()
-                        true
-                    }
 
-                    alertDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnLongClickListener {
-                        copyToClipboard("Profile ID", " $sender")
-                        alertDialog.dismiss()
-                        true
-                    }
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setOnLongClickListener {
+                    copyToClipboard("Profile ID", " $sender")
+                    dialog.dismiss()
+                    true
                 }
+
+            } catch (e: Exception) {
+                GrindrPlus.showToast(Toast.LENGTH_LONG, "Error displaying profile IDs: ${e.message}")
+            }
         }
     }
 }

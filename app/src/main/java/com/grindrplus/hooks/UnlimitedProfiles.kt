@@ -29,21 +29,11 @@ class UnlimitedProfiles : Hook(
     override fun init() {
         findClass(serverDrivenCascadeCachedState)
             .hook("getItems", HookStage.AFTER) { param ->
-                val allItems = param.getResult() as List<*>
-
-                // Filter to only profile items
-                val profileItems = allItems.filter {
+                val items = (param.getResult() as List<*>).filter {
                     it?.javaClass?.name == serverDrivenCascadeCachedProfile
                 }
 
-                // Apply custom filtering if enabled
-                val filteredItems = if (Config.get("custom_filtering_enabled", false) as Boolean) {
-                    applyCustomFilters(profileItems)
-                } else {
-                    profileItems
-                }
-
-                param.setResult(filteredItems)
+                param.setResult(items)
             }
 
         findClass(profileTagCascadeFragment)
@@ -116,126 +106,222 @@ class UnlimitedProfiles : Hook(
             param.setResult(transformedFlow)
         }
 
+        // FIXED: Only hook swipe gestures, not all profile interactions
+        // This was breaking ProfileDetails.kt click handlers
         findClass(onProfileClicked).hook("invokeSuspend", HookStage.BEFORE) { param ->
-            if (Config.get("disable_profile_swipe", false) as Boolean) {
-                getObjectField(param.thisObject(), param.thisObject().javaClass.declaredFields
-                    .firstOrNull { it.type.name.contains("ServerDrivenCascadeCachedProfile") }?.name
-                )?.let { cachedProfile ->
-                    runCatching { getObjectField(cachedProfile, "profileIdLong").toString() }
-                        .onSuccess { profileId ->
-                            openProfile(profileId)
-                            param.setResult(null)
-                        }
-                        .onFailure { loge("Profile ID not found in cached profile") }
+            // Only disable swipe if the config is enabled
+            if (!(Config.get("disable_profile_swipe", false) as Boolean)) {
+                return@hook
+            }
+
+            // Try to get the cached profile from the coroutine context
+            val cachedProfile = getObjectField(param.thisObject(), param.thisObject().javaClass.declaredFields
+                .firstOrNull { it.type.name.contains("ServerDrivenCascadeCachedProfile") }?.name
+            )
+
+            if (cachedProfile != null) {
+                runCatching {
+                    val profileId = getObjectField(cachedProfile, "profileIdLong").toString()
+
+                    // CRITICAL: Check if this is a swipe gesture vs a normal click
+                    // Swipe gestures typically come from cascade view, not profile view
+                    // We should only intercept cascade swipes, not ProfileBarView clicks
+
+                    // Get the calling context to determine if this is from cascade or profile view
+                    val stackTrace = Thread.currentThread().stackTrace
+                    val isFromCascade = stackTrace.any {
+                        it.className.contains("Cascade") ||
+                                it.className.contains("browse")
+                    }
+                    val isFromProfileView = stackTrace.any {
+                        it.className.contains("ProfileBarView") ||
+                                it.className.contains("ProfilesActivity")
+                    }
+
+                    // Only intercept cascade swipes, allow profile view clicks
+                    if (isFromCascade && !isFromProfileView) {
+                        openProfile(profileId)
+                        param.setResult(null)
+                        Logger.d("Intercepted cascade swipe for profile: $profileId")
+                    } else {
+                        Logger.d("Allowing profile view click for: $profileId")
+                        // Don't set result - let normal handling continue
+                    }
+                }.onFailure {
+                    loge("Error in profile click handler: ${it.message}")
                 }
             }
+        }
+
+        // Apply custom filters if enabled
+        findClass(serverDrivenCascadeCachedState)
+            .hook("getItems", HookStage.AFTER) { param ->
+                if (!(Config.get("custom_filtering_enabled", false) as Boolean)) {
+                    return@hook
+                }
+
+                val items = param.getResult() as? List<*> ?: return@hook
+                val filteredItems = applyCustomFilters(items)
+
+                if (filteredItems.size != items.size) {
+                    Logger.d("Filtered ${items.size - filteredItems.size} profiles")
+                }
+
+                param.setResult(filteredItems)
+            }
+    }
+
+    private fun safeGetField(obj: Any?, fieldName: String): Any? {
+        return try {
+            if (obj == null) return null
+            val field = obj.javaClass.getDeclaredField(fieldName)
+            field.isAccessible = true
+            field.get(obj)
+        } catch (e: Exception) {
+            null
         }
     }
 
     private fun applyCustomFilters(profiles: List<Any?>): List<Any?> {
-        return profiles.filter { profileItem ->
-            try {
-                if (profileItem == null) return@filter false
+        val maxDistance = Config.get("filter_max_distance", 0) as Int
+        val favoritesOnly = Config.get("filter_favorites_only", false) as Boolean
+        val genderFilter = Config.get("filter_gender", 0) as Int
+        val tribeFilter = Config.get("filter_tribe", 0) as Int
+        val ethnicityFilter = Config.get("filter_ethnicity", "0") as String
+        val ethnicityMode = Config.get("filter_ethnicity_mode", "include") as String
+        val requireSocial = Config.get("filter_has_social_networks", false) as Boolean
+        val tagsFilter = Config.get("filter_tags", "") as String
+        val tagsMode = Config.get("filter_tags_mode", "include") as String
+        val ageMin = Config.get("filter_age_min", 0) as Int
+        val ageMax = Config.get("filter_age_max", 0) as Int
+        val includeNoAge = Config.get("filter_age_include_no_age", true) as Boolean
+        val aboutText = Config.get("filter_about_text", "") as String
+        val aboutMode = Config.get("filter_about_mode", "include") as String
 
-                // Get the data object from cascade item
-                val profileData = try {
-                    getObjectField(profileItem, "data")
-                } catch (e: Exception) {
-                    profileItem // If no "data" field, assume profileItem IS the data
-                }
+        val targetTags = if (tagsFilter.isNotEmpty()) {
+            tagsFilter.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+        } else {
+            emptySet()
+        }
+
+        return profiles.filter { profileItem ->
+            if (profileItem == null) return@filter false
+
+            try {
+                val profileId = safeGetField(profileItem, "profileIdLong")?.toString() ?: "unknown"
 
                 // Filter 1: Maximum Distance
-                val maxDistance = Config.get("filter_max_distance", 0) as Int
                 if (maxDistance > 0) {
-                    val distanceMeters = (getObjectField(profileData, "distanceMeters") as? Int)
-                        ?: (getObjectField(profileData, "distance") as? Double)?.let { (it * 1000).toInt() }
+                    val distanceMeters = (safeGetField(profileItem, "distanceMeters") as? Double)?.toInt()
                     if (distanceMeters != null && distanceMeters > maxDistance) {
                         return@filter false
                     }
                 }
 
                 // Filter 2: Favorites Only
-                val favoritesOnly = Config.get("filter_favorites_only", false) as Boolean
                 if (favoritesOnly) {
-                    val isFavorite = getObjectField(profileData, "isFavorite") as? Boolean
+                    val isFavorite = safeGetField(profileItem, "isFavorite") as? Boolean
                     if (isFavorite != true) {
                         return@filter false
                     }
                 }
 
                 // Filter 3: Gender
-                val genderFilter = Config.get("filter_gender", 0) as Int
                 if (genderFilter > 0) {
-                    val genders = getObjectField(profileData, "genders") as? List<*>
-                    if (genders == null || genders.isEmpty() || !genders.any {
-                            (it as? Int) == genderFilter
-                        }) {
+                    @Suppress("UNCHECKED_CAST")
+                    val genders = safeGetField(profileItem, "genders") as? List<Int>
+                    val hasMatchingGender = genders?.contains(genderFilter) == true
+                    if (!hasMatchingGender) {
                         return@filter false
                     }
                 }
 
                 // Filter 4: Tribe
-                val tribeFilter = Config.get("filter_tribe", 0) as Int
                 if (tribeFilter > 0) {
-                    // Try both field names (cascade uses "tribes", v7 uses "grindrTribes")
-                    val tribes = getObjectField(profileData, "tribes") as? List<*>
-                        ?: getObjectField(profileData, "grindrTribes") as? List<*>
-                    if (tribes == null || !tribes.any {
-                            (it as? Int) == tribeFilter
-                        }) {
+                    @Suppress("UNCHECKED_CAST")
+                    val tribes = safeGetField(profileItem, "tribes") as? List<Int>
+                    val hasMatchingTribe = tribes?.contains(tribeFilter) == true
+                    if (!hasMatchingTribe) {
                         return@filter false
                     }
                 }
 
-                // Filter 5: Ethnicity (single value, not array!)
-                val ethnicityFilter = Config.get("filter_ethnicity", "0") as String
+                // Filter 5: Ethnicity
                 if (ethnicityFilter != "0") {
-                    val filterMode = Config.get("filter_ethnicity_mode", "include") as String
                     val targetEthnicities = ethnicityFilter.split(",")
-                        .mapNotNull { it.toIntOrNull() }
+                        .mapNotNull { it.trim().toIntOrNull() }
                         .toSet()
 
-                    // Ethnicity is a single Int, not an array
-                    val profileEthnicity = getObjectField(profileData, "ethnicity") as? Int
+                    if (targetEthnicities.isNotEmpty()) {
+                        val profileEthnicity = safeGetField(profileItem, "ethnicity") as? Int
+                        val matches = profileEthnicity != null && profileEthnicity in targetEthnicities
 
-                    when (filterMode) {
-                        "include" -> {
-                            // Show only if profile ethnicity matches one of the target ethnicities
-                            if (profileEthnicity == null || profileEthnicity !in targetEthnicities) {
-                                return@filter false
-                            }
-                        }
-                        "exclude" -> {
-                            // Hide if profile ethnicity matches any target ethnicity
-                            if (profileEthnicity != null && profileEthnicity in targetEthnicities) {
-                                return@filter false
-                            }
+                        when (ethnicityMode) {
+                            "include" -> if (!matches) return@filter false
+                            "exclude" -> if (matches) return@filter false
                         }
                     }
                 }
 
                 // Filter 6: Social Networks
-                val requireSocial = Config.get("filter_has_social_networks", false) as Boolean
                 if (requireSocial) {
-                    val socialNetworks = getObjectField(profileData, "socialNetworks")
-                    if (socialNetworks == null) {
-                        return@filter false
-                    }
-                    // Check if socialNetworks is not empty (can be array or map)
-                    val hasSocial = when (socialNetworks) {
-                        is List<*> -> socialNetworks.isNotEmpty()
-                        is Map<*, *> -> socialNetworks.isNotEmpty()
-                        else -> false
-                    }
-                    if (!hasSocial) {
+                    @Suppress("UNCHECKED_CAST")
+                    val socialNetworks = safeGetField(profileItem, "socialNetworks") as? List<*>
+                    if (socialNetworks.isNullOrEmpty()) {
                         return@filter false
                     }
                 }
 
-                // Profile passed all filters
+                // Filter 7: About Me Text
+                if (aboutText.isNotEmpty()) {
+                    val aboutMe = safeGetField(profileItem, "aboutMe") as? String ?: ""
+                    val containsText = aboutMe.contains(aboutText, ignoreCase = true)
+
+                    when (aboutMode) {
+                        "include" -> if (!containsText) return@filter false
+                        "exclude" -> if (containsText) return@filter false
+                    }
+                }
+
+                // Filter 8: Tags
+                if (targetTags.isNotEmpty()) {
+                    @Suppress("UNCHECKED_CAST")
+                    val profileTags = safeGetField(profileItem, "tags") as? List<String>
+                    val profileTagSet = profileTags?.map { it.lowercase() }?.toSet() ?: emptySet()
+
+                    val hasMatchingTag = targetTags.any { targetTag ->
+                        profileTagSet.any { profileTag -> profileTag.contains(targetTag) }
+                    }
+
+                    when (tagsMode) {
+                        "include" -> if (!hasMatchingTag) return@filter false
+                        "exclude" -> if (hasMatchingTag) return@filter false
+                    }
+                }
+
+                // Filter 9: Age
+                if (ageMin > 0 || ageMax > 0) {
+                    val profileAge = safeGetField(profileItem, "age") as? Int
+
+                    if (profileAge == null) {
+                        if (!includeNoAge) {
+                            return@filter false
+                        }
+                    } else {
+                        val ageInRange = when {
+                            ageMin == ageMax -> profileAge == ageMin
+                            else -> profileAge in ageMin..ageMax
+                        }
+
+                        if (!ageInRange) {
+                            return@filter false
+                        }
+                    }
+                }
+
                 true
+
             } catch (e: Exception) {
-                // If there's an error accessing fields, keep the profile by default
                 Logger.e("Error filtering profile: ${e.message}")
                 true
             }

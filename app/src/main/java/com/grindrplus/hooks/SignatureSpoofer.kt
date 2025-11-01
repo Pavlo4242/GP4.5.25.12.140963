@@ -82,6 +82,27 @@ fun spoofSignatures(param: XC_LoadPackage.LoadPackageParam) {
             }
         )
 
+
+        fun isFirebase() = Thread.currentThread().stackTrace.any {
+            it.className.startsWith("com.google.firebase")
+        }
+
+        fun isFacebook() = Thread.currentThread().stackTrace.any {
+            it.className.startsWith("com.facebook")
+        }
+
+        findAndHookMethod(
+            ContextWrapper::class.java,
+            "getPackageName",
+            object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam<*>) {
+                    if (isFirebase() || isFacebook()) {
+                        param.result = GRINDR_PACKAGE_NAME
+                    }
+                }
+            }
+        )
+
         findAndHookMethod(
             "com.google.firebase.messaging.Metadata",
             param.classLoader,

@@ -13,13 +13,11 @@ import android.os.Looper
 import android.widget.Toast
 import com.grindrplus.bridge.BridgeClient
 import com.grindrplus.core.Config
-import com.grindrplus.core.DatabaseManager
 import com.grindrplus.core.EventManager
 import com.grindrplus.core.InstanceManager
 import com.grindrplus.core.Logger
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.TaskScheduler
-import com.grindrplus.core.ToastLogger
 import com.grindrplus.utils.TaskManager
 import com.grindrplus.core.Utils.handleImports
 import com.grindrplus.core.http.Client
@@ -30,6 +28,7 @@ import com.grindrplus.utils.PCHIP
 import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.hookConstructor
 import dalvik.system.DexClassLoader
+import de.robv.android.xposed.XposedHelpers.getObjectField
 import de.robv.android.xposed.XposedHelpers.callMethod
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,9 +53,8 @@ object GrindrPlus {
         private set
     lateinit var classLoader: ClassLoader
         private set
-    //lateinit var database: GPDatabase
-    val database: GPDatabase by lazy { GPDatabase.create(context) }
-      //  private set
+    lateinit var database: GPDatabase
+        private set
     lateinit var bridgeClient: BridgeClient
         internal set
     lateinit var instanceManager: InstanceManager
@@ -135,9 +133,8 @@ object GrindrPlus {
 
         this.context = application
         this.bridgeClient = BridgeClient(context)
-        DatabaseManager.initializeDatabaseIfNeeded(context)
-        Logger.initialize(context, bridgeClient, true)
 
+        Logger.initialize(context, bridgeClient, true)
         Logger.i("Initializing GrindrPlus...", LogSource.MODULE)
 
         checkVersionCodes(versionCodes, versionNames)
@@ -164,7 +161,7 @@ object GrindrPlus {
 
         this.classLoader =
             DexClassLoader(newModule.absolutePath, null, null, context.classLoader)
-       // this.database = GPDatabase.create(context)
+        this.database = GPDatabase.create(context)
         this.hookManager = HookManager()
         this.instanceManager = InstanceManager(classLoader)
         this.packageName = context.packageName
@@ -370,9 +367,6 @@ object GrindrPlus {
     }
 
     fun showToast(duration: Int, message: String, appContext: Context? = null) {
-        // Add this line to log the toast message
-        ToastLogger.log(message)
-
         val useContext = appContext ?: context
         runOnMainThread(useContext) {
             Toast.makeText(useContext, message, duration).show()

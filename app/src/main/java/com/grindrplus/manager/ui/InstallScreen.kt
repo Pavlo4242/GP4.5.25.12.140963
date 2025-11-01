@@ -66,14 +66,6 @@ import com.grindrplus.manager.ui.components.FileDialog
 
 private val logEntries = mutableStateListOf<LogEntry>()
 
-private enum class GrindrInstallationStatus {
-    CHECKING,
-    INSTALLED,
-    NOT_INSTALLED,
-    CHECK_FAILED
-}
-
-
 @Composable
 fun InstallPage(context: Activity, innerPadding: PaddingValues) {
     var isLoading by remember { mutableStateOf(true) }
@@ -94,7 +86,6 @@ fun InstallPage(context: Activity, innerPadding: PaddingValues) {
     var customBundleUri by remember { mutableStateOf<Uri?>(null) }
     var customModUri by remember { mutableStateOf<Uri?>(null) }
     val manifestUrl = (Config.get("custom_manifest", DATA_URL) as String).ifBlank { null }
-    var grindrStatus by remember { mutableStateOf(GrindrInstallationStatus.CHECKING) }
 
     val print: Print = { output ->
         val logType = ConsoleLogger.parseLogType(output)
@@ -121,7 +112,7 @@ fun InstallPage(context: Activity, innerPadding: PaddingValues) {
         withContext(Dispatchers.IO) {
             StorageUtils.cleanupOldInstallationFiles(context, true, null)
         }
-        grindrStatus = getGrindrInstallationStatus(context)
+
         addLog("Welcome to Grindr Plus Manager")
         addLog("Loading available versions...", LogType.INFO)
 
@@ -338,8 +329,7 @@ fun InstallPage(context: Activity, innerPadding: PaddingValues) {
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 OutlinedButton(
                     onClick = {
@@ -363,6 +353,12 @@ fun InstallPage(context: Activity, innerPadding: PaddingValues) {
                         }
                     },
                     enabled = !isInstalling && !isCloning,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(
+                            alpha = 0.38f
+                        )
+                    ),
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
@@ -373,118 +369,60 @@ fun InstallPage(context: Activity, innerPadding: PaddingValues) {
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    when (grindrStatus) {
-                        GrindrInstallationStatus.CHECKING -> {
-                            CircularProgressIndicator(modifier = Modifier.height(48.dp)) // Match button height
-                        }
-                        GrindrInstallationStatus.INSTALLED -> {
-                            // New button layout for installed state
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                // Open Grindr button
-                                Button(
-                                    onClick = { launchGrindr(context) },
-                                    enabled = !isInstalling && !isCloning,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Open Grindr", modifier = Modifier.padding(vertical = 8.dp))
+                Button(
+                    onClick = {
+                        if (installationSuccessful) {
+                            launchGrindr(context)
+                        } else {
+                            if (useCustomFiles && customBundleUri != null && customModUri != null) {
+                                startCustomInstallation()
+                            } else {
+                                if (selectedVersion == null) {
+                                    showToast(context, "Please select a version first")
+                                    return@Button
                                 }
 
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                // Force Install button
-                                OutlinedButton(
-                                    onClick = {
-                                        if (useCustomFiles && customBundleUri != null && customModUri != null) {
-                                            startCustomInstallation()
-                                        } else {
-                                            if (selectedVersion == null) {
-                                                showToast(context, "Please select a version first")
-                                                return@OutlinedButton
-                                            }
-                                            startInstallation(
-                                                selectedVersion!!,
-                                                onStarted = { isInstalling = true },
-                                                onCompleted = { success ->
-                                                    isInstalling = false
-                                                    if (success) {
-                                                        grindrStatus = GrindrInstallationStatus.INSTALLED
-                                                    }
-                                                },
-                                                context,
-                                                print
-                                            )
-                                        }
+                                startInstallation(
+                                    selectedVersion!!,
+                                    onStarted = { isInstalling = true },
+                                    onCompleted = { success ->
+                                        isInstalling = false
+                                        installationSuccessful = success
                                     },
-                                    enabled = (selectedVersion != null || (useCustomFiles && customBundleUri != null)) && !isInstalling && !isCloning,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(if (isInstalling) "Force Installing..." else "Force Install",
-                                        modifier = Modifier.padding(vertical = 8.dp))
-                                }
+                                    context,
+                                    print
+                                )
                             }
                         }
-                        GrindrInstallationStatus.NOT_INSTALLED -> {
-                            Button(
-                                onClick = {
-                                    if (useCustomFiles && customBundleUri != null && customModUri != null) {
-                                        startCustomInstallation()
-                                    } else {
-                                        if (selectedVersion == null) {
-                                            showToast(context, "Please select a version first")
-                                            return@Button
-                                        }
-                                        startInstallation(
-                                            selectedVersion!!,
-                                            onStarted = { isInstalling = true },
-                                            onCompleted = { success ->
-                                                isInstalling = false
-                                                if (success) {
-                                                    grindrStatus = GrindrInstallationStatus.INSTALLED
-                                                }
-                                            },
-                                            context,
-                                            print
-                                        )
-                                    }
-                                },
-                                enabled = (selectedVersion != null || (useCustomFiles && customBundleUri != null)) && !isInstalling && !isCloning,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(if (isInstalling) "Installing..." else "Install", modifier = Modifier.padding(vertical = 8.dp))
-                            }
-                        }
-                        GrindrInstallationStatus.CHECK_FAILED -> {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Check failed", style = MaterialTheme.typography.bodySmall)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row {
-                                    Button(
-                                        onClick = { launchGrindr(context) },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = 4.dp)
-                                    ) {
-                                        Text("Relaunch", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Button(
-                                        onClick = { grindrStatus = getGrindrInstallationStatus(context) },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = 4.dp)
-                                    ) {
-                                        Text("Recheck", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    },
+                    enabled = ((selectedVersion != null || (useCustomFiles && customBundleUri != null && customModUri != null)) ||
+                            installationSuccessful) && !isInstalling && !isCloning,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(
+                            alpha = 0.12f
+                        ),
+                        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(
+                            alpha = 0.38f
+                        )
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = if (isInstalling) {
+                            "Installing..."
+                        } else if (installationSuccessful) {
+                            "Open Grindr"
+                        } else {
+                            "Install"
+                        },
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
                 }
             }
 
-            if (grindrStatus == GrindrInstallationStatus.INSTALLED) {
+            if (isGrindrInstalled(context)) {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Button(
@@ -738,16 +676,13 @@ private fun launchGrindr(context: Context) {
     }
 }
 
-private fun getGrindrInstallationStatus(context: Context): GrindrInstallationStatus {
+private fun isGrindrInstalled(context: Context): Boolean {
     return try {
-        context.packageManager.getPackageInfo("com.grindrapp.android", 0)
-        GrindrInstallationStatus.INSTALLED
+        context.packageManager.getPackageInfo(GRINDR_PACKAGE_NAME, 0)
+        true
     } catch (_: PackageManager.NameNotFoundException) {
-        GrindrInstallationStatus.NOT_INSTALLED
+        false
     }
-     catch (e: Exception) {
-         GrindrInstallationStatus.CHECK_FAILED
-     }
 }
 
 data class Data(

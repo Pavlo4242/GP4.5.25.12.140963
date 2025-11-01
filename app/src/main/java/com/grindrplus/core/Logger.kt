@@ -13,7 +13,7 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 enum class LogLevel { DEBUG, INFO, WARNING, ERROR, SUCCESS }
-enum class LogSource { MODULE, MANAGER, HOOK, TASK, BRIDGE, UNKNOWN, HTTP }
+enum class LogSource { MODULE, MANAGER, HOOK, TASK, BRIDGE, UNKNOWN, HTTP, DB }
 
 @SuppressLint("StaticFieldLeak", "ConstantLocale")
 object Logger {

@@ -12,7 +12,6 @@ import org.lsposed.patch.util.Logger
 import java.io.File
 import java.io.IOException
 
-
 // 5th
 class PatchApkStep(
     private val unzipFolder: File,
@@ -26,8 +25,6 @@ class PatchApkStep(
 
     private companion object {
         const val MAPS_API_KEY_NAME = "com.google.android.geo.API_KEY"
-        const val WRITE_PERMISSION = "android.permission.WRITE_EXTERNAL_STORAGE"
-        const val MANAGE_PERMISSION = "android.permission.MANAGE_EXTERNAL_STORAGE"
     }
 
     override suspend fun doExecute(context: Context, print: Print) {
@@ -49,35 +46,6 @@ class PatchApkStep(
 
                 print("Using ${baseApk.name} for Maps API key modification")
                 val apkModule = ApkModule.loadApkFile(baseApk)
-
-                // 2. Get the AndroidManifestBlock object
-                val manifest = apkModule.getAndroidManifest()
-
-
-                // 3. Find the specific <uses-permission> element to remove
-                val permissionNameToRemove = "android.permission.WRITE_EXTERNAL_STORAGE"
-                val permissionToRemove = manifest.getUsesPermission(permissionNameToRemove)
-
-
-                // 4. If the element exists, remove it
-                if (permissionToRemove != null) {
-                    // Get the parent element (<manifest>) and remove the child
-                    val manifestElement = manifest.getManifestElement()
-                    manifestElement.remove(permissionToRemove)
-                    println("Removed permission: " + permissionNameToRemove)
-                } else {
-                    println("Permission not found: " + permissionNameToRemove)
-                }
-
-
-                // 5. Add the two new <uses-permission> elements
-                val newPermission1 = "android.permission.WRITE_EXTERNAL_STORAGE"
-                val newPermission2 = "android.permission.MANAGE_EXTERNAL_STORAGE"
-
-                manifest.addUsesPermission(newPermission1)
-                manifest.addUsesPermission(newPermission2)
-                println("Added permission: " + newPermission1)
-                println("Added permission: " + newPermission2)
 
                 val metaElements = apkModule.androidManifest.applicationElement.getElements { element ->
                     element.name == "meta-data"

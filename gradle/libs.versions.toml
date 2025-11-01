@@ -26,14 +26,11 @@ runtimeAndroid = "1.7.8"
 timber = "5.0.1"
 zipalignJava = "1.2.1"
 zipAndroid = "2.2.0"
-kotlinxCoroutines = "1.8.1"  # <-- ADD THIS LINE
-lifecycleViewModelCompose = "2.8.7"  # Same version as lifecycleRuntimeKtx
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
-androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleViewModelCompose" }
 androidx-material-icons-core = { module = "androidx.compose.material:material-icons-core" }
 androidx-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 androidx-material3 = { module = "androidx.compose.material3:material3" }
@@ -62,8 +59,6 @@ androidx-runtime-android = { group = "androidx.compose.runtime", name = "runtime
 timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 zip-android = { module = "io.github.diamondminer88:zip-android", version.ref = "zipAndroid" }
 zipalign-java = { module = "com.github.iyxan23:zipalign-java", version.ref = "zipalignJava" }
-kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" } #
-kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" } #
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

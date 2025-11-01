@@ -1,9 +1,8 @@
+/*
 package com.grindrplus.commands
-
 
 import android.app.AlertDialog
 import com.grindrplus.GrindrPlus
-import com.grindrplus.ui.Utils.copyToClipboard
 
 class CommandHandler(
     recipient: String,
@@ -16,7 +15,6 @@ class CommandHandler(
         commandModules.add(Profile(recipient, sender))
         commandModules.add(Utils(recipient, sender))
         commandModules.add(Database(recipient, sender))
-        commandModules.add(Filtering(recipient, sender))
     }
 
     fun handle(input: String) {
@@ -25,14 +23,10 @@ class CommandHandler(
 
         if (command == "help") {
             GrindrPlus.runOnMainThreadWithCurrentActivity { activity ->
-                val helpText = commandModules.joinToString("\n\n") { it.getHelp() }
                 AlertDialog.Builder(activity)
                     .setTitle("Help")
-                    .setMessage(helpText)
+                    .setMessage(commandModules.joinToString("\n\n") { it.getHelp() })
                     .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
-                    .setNegativeButton("Copy") { _, _ ->
-                        copyToClipboard("Help", helpText)
-                    }
                     .create()
                     .show()
             }
@@ -42,4 +36,4 @@ class CommandHandler(
             if (module.handle(command, args.drop(1))) break
         }
     }
-}
+}*/

@@ -23,7 +23,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -94,25 +93,6 @@ class BridgeClient(private val context: Context) {
                 }
             }
             serviceWatchdog.postDelayed(this, WATCHDOG_CHECK_INTERVAL_MS)
-        }
-    }
-
-    fun getHttpDbFile(): File? {
-        if (!isBound.get()) {
-            if (connectBlocking(3000)) {
-                Logger.d("Connected to service on-demand for getDbFile", LogSource.BRIDGE)
-            } else {
-                Logger.w("Cannot get DB file, service not bound", LogSource.BRIDGE)
-                return null
-            }
-        }
-
-        return try {
-            val filePath = bridgeService?.getHttpDbFilePath()
-            filePath?.let { File(it) }
-        } catch (e: Exception) {
-            Logger.e("Error getting DB file: ${e.message}", LogSource.BRIDGE)
-            null
         }
     }
 
@@ -474,21 +454,6 @@ class BridgeClient(private val context: Context) {
         }
     }
 
-    fun writeCredentialsLog(content: String) {
-        if (!isBound.get()) {
-            if (!connectBlocking(1000)) { // Short timeout, non-critical
-                Logger.w("Cannot write credentials log, service not bound", LogSource.BRIDGE)
-                return
-            }
-        }
-
-        try {
-            bridgeService?.writeCredentialsLog(content)
-        } catch (e: Exception) {
-            Logger.e("Error writing credentials log: ${e.message}", LogSource.BRIDGE)
-        }
-    }
-
     fun sendNotification(
         title: String,
         message: String,
@@ -557,12 +522,7 @@ class BridgeClient(private val context: Context) {
         }
     }
 
-    fun shouldRegenAndroidId(packageName: String?): Boolean {
-        if (packageName == null) {
-            Logger.w("shouldRegenAndroidId called with null packageName", LogSource.BRIDGE)
-            return false
-        }
-
+    fun shouldRegenAndroidId(packageName: String): Boolean {
         if (!isBound.get()) {
             if (connectBlocking(3000)) {
                 Logger.d(

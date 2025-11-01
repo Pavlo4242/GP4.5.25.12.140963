@@ -34,35 +34,13 @@ class WebSocketAlive : Hook(
             }
 
             findClass(safeDkLifecycleManager).hook("a", HookStage.BEFORE) { param ->
-                // The goal is to prevent this method from successfully executing.
-                // By setting the result to null, we stop the original method from running,
-                // regardless of what its arguments are, or if it has any at all.
-                logd("Preventing SafeDK's method 'a' from running entirely.")
-                param.setResult(null)
-            }
-
-            //findClass(safeDkLifecycleManager).hook("a", HookStage.BEFORE) { param ->
-                // DEFENSIVE CHECK: Ensure there is at least one argument and it's a Boolean.
-             //   if (param.args().isNotEmpty() && param.args()[0] is Boolean) {
-              //      val isBackground = param.args()[0] as Boolean
-               //     if (isBackground) {
-                //        logd("Preventing SafeDK from setting background state via a(true)")
-                 //       param.setResult(null) // Only block the call if it's setting the state to true
-                 //   }
-              //  }
-                // If there are no arguments, or the first arg is not a boolean,
-                // we do nothing and let the original method run (if it exists).
-                // This prevents the crash.
-           // }
-
-            /*findClass(safeDkLifecycleManager).hook("a", HookStage.BEFORE) { param ->
                 val isBackground = param.arg<Boolean>(0)
                 if (isBackground) {
                     logd("Preventing SafeDK from setting background state")
                     param.setResult(null)
                 }
             }
-*/
+
             findClass(safeDkLifecycleManager).hook("b", HookStage.BEFORE) { param ->
                 logd("Preventing SafeDK background identification")
                 param.setResult(null)

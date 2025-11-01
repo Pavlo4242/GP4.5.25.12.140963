@@ -37,8 +37,13 @@ class Installation(
     private val modFile = File(folder, "mod-$version.zip")
     private val bundleFile = File(folder, "grindr-$version.zip")
 
+    // Store custom installation files for reuse
+    private var customBundleFile: File? = null
+    private var customModFile: File? = null
+
     private val installStep = InstallApkStep(outputDir)
-    private val patchApkStep = PatchApkStep(unzipFolder, outputDir, modFile, keyStoreUtils.keyStore, mapsApiKey)
+    private val patchApkStep =
+        PatchApkStep(unzipFolder, outputDir, modFile, keyStoreUtils.keyStore, mapsApiKey)
     private val commonSteps = listOf(
         // Order matters
         CheckStorageSpaceStep(folder),
@@ -60,18 +65,7 @@ class Installation(
         embedLSpatch: Boolean,
         print: Print,
     ) = performOperation(
-        steps = commonSteps + listOf(
-            CloneGrindrStep(
-                folder = unzipFolder,
-                packageName = packageName,
-                appName = appName,
-                debuggable = debuggable,
-            ),
-            SignClonedGrindrApk(keyStoreUtils, unzipFolder),
-            PatchApkStep(unzipFolder, outputDir, modFile,
-                keyStoreUtils.keyStore, mapsApiKey, embedLSpatch),
-            installStep
-        ),
+        steps = getCloneSteps(packageName, appName, debuggable, embedLSpatch),
         operationName = "clone",
         print = print,
     )
@@ -82,14 +76,82 @@ class Installation(
         print: Print
     ) = performOperation(
         steps = listOf(
+            CheckStorageSpaceStep(folder).also {
+                print("Custom installation inputs:")
+                print("  Grindr Bundle: ${bundleFile.absolutePath}")
+                print("  Mod File: ${modFile.absolutePath}")
+            },
             CheckStorageSpaceStep(folder),
             ExtractBundleStep(bundleFile, unzipFolder),
+
             PatchApkStep(unzipFolder, outputDir, modFile, keyStoreUtils.keyStore, mapsApiKey),
             InstallApkStep(outputDir)
         ),
         operationName = "custom_install",
-        print = print
+        print = print,
+        onSuccess = {
+            // Store the custom files for later use in clone (executed ONLY on successful completion)
+            this.customBundleFile = bundleFile
+            this.customModFile = modFile
+            print("Custom installation files saved for cloning")
+        }
     )
+
+    /**
+     * Clone using previously installed custom files
+     */
+    suspend fun cloneFromCustom(
+        packageName: String,
+        appName: String,
+        debuggable: Boolean,
+        embedLSpatch: Boolean,
+        print: Print,
+    ) = performOperation(
+        steps = getCloneSteps(packageName, appName, debuggable, embedLSpatch, useCustomFiles = true),
+        operationName = "clone_from_custom",
+        print = print,
+    )
+
+    private fun getCloneSteps(
+        packageName: String,
+        appName: String,
+        debuggable: Boolean,
+        embedLSpatch: Boolean,
+        useCustomFiles: Boolean = false
+    ): List<Step> {
+        return if (useCustomFiles && customBundleFile != null && customModFile != null) {
+            // Use stored custom files instead of downloading
+            print("Using custom installation files for cloning")
+            listOf(
+                CheckStorageSpaceStep(folder),
+                ExtractBundleStep(customBundleFile!!, unzipFolder),
+                CloneGrindrStep(
+                    folder = unzipFolder,
+                    packageName = packageName,
+                    appName = appName,
+                    debuggable = debuggable,
+                ),
+                SignClonedGrindrApk(keyStoreUtils, unzipFolder),
+                PatchApkStep(unzipFolder, outputDir, customModFile!!,
+                    keyStoreUtils.keyStore, mapsApiKey, embedLSpatch),
+                installStep
+            )
+        } else {
+            // Use normal download flow
+            commonSteps + listOf(
+                CloneGrindrStep(
+                    folder = unzipFolder,
+                    packageName = packageName,
+                    appName = appName,
+                    debuggable = debuggable,
+                ),
+                SignClonedGrindrApk(keyStoreUtils, unzipFolder),
+                PatchApkStep(unzipFolder, outputDir, modFile,
+                    keyStoreUtils.keyStore, mapsApiKey, embedLSpatch),
+                installStep
+            )
+        }
+    }
 
     suspend fun performOperation(
         steps: List<Step>,
@@ -139,6 +201,22 @@ class Installation(
         showToast(errorMsg)
         cleanupOnFailure()
         throw e
+    }
+
+    /**
+     * Check if custom installation files are available for cloning
+     */
+    fun hasCustomInstallationFiles(): Boolean {
+        return customBundleFile != null && customModFile != null &&
+                customBundleFile!!.exists() && customModFile!!.exists()
+    }
+
+    /**
+     * Clear stored custom installation files
+     */
+    fun clearCustomInstallationFiles() {
+        customBundleFile = null
+        customModFile = null
     }
 
     private fun cleanupOnFailure() {

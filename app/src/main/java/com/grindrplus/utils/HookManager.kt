@@ -23,6 +23,7 @@ import com.grindrplus.hooks.NotificationAlerts
 import com.grindrplus.hooks.OnlineIndicator
 import com.grindrplus.hooks.ProfileDetails
 import com.grindrplus.hooks.ProfileViews
+import com.grindrplus.hooks.ProfileViewsTracker
 import com.grindrplus.hooks.QuickBlock
 import com.grindrplus.hooks.StatusDialog
 import com.grindrplus.hooks.TimberLogging
@@ -65,6 +66,7 @@ class HookManager {
                 ProfileViews(),
                 QuickBlock(),
                 EmptyCalls(),
+                ProfileViewsTracker(),
                 UnlimitedAlbums()
             )
 

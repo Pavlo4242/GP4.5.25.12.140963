@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
 import com.grindrplus.persistence.model.TeleportLocationEntity
+import timber.log.Timber
 
 @Dao
 interface TeleportLocationDao {
@@ -14,6 +15,7 @@ interface TeleportLocationDao {
      * @return A list of teleport locations
      */
     @Query("SELECT * FROM TeleportLocationEntity")
+
     suspend fun getLocations(): List<TeleportLocationEntity>
 
     /**
