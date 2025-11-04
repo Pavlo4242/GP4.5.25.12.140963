@@ -101,6 +101,7 @@ object GrindrPlus {
         )
     )
 
+
     val currentActivity: Activity?
         get() = currentActivityRef?.get()
 
@@ -162,6 +163,7 @@ object GrindrPlus {
         this.classLoader =
             DexClassLoader(newModule.absolutePath, null, null, context.classLoader)
         this.database = GPDatabase.create(context)
+        GPDatabase.DatabaseManager.markReady()
         this.hookManager = HookManager()
         this.instanceManager = InstanceManager(classLoader)
         this.packageName = context.packageName

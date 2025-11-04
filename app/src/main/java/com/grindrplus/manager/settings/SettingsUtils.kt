@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -113,6 +114,54 @@ object SettingsUtils {
             }
         }
     }
+}
+
+@Preview
+@Composable
+fun ApiKeyTestDialogPreview() {
+    ApiKeyTestDialog(
+        isLoading = false,
+        title = "Success!",
+        message = "Your Google Maps API key is working correctly. You can use it with GrindrPlus.",
+        rawResponse = "{\n   \"results\" : [],\n   \"status\" : \"OK\"\n}",
+        onDismiss = {}
+    )
+}
+
+@Preview
+@Composable
+fun ApiKeyTestDialogLoadingPreview() {
+    ApiKeyTestDialog(
+        isLoading = true,
+        title = "Testing",
+        message = "Testing your API key...",
+        rawResponse = "",
+        onDismiss = {}
+    )
+}
+
+@Preview
+@Composable
+fun ApiKeyTestDialogErrorPreview() {
+    ApiKeyTestDialog(
+        isLoading = false,
+        title = "Invalid API Key",
+        message = "Your API key is invalid. Please double-check that you've copied it correctly.",
+        rawResponse = "{\n   \"error_message\" : \"API key is invalid. Please check the API key you are using.\",\n   \"results\" : [],\n   \"status\" : \"REQUEST_DENIED\"\n}",
+        onDismiss = {}
+    )
+}
+
+@Preview
+@Composable
+fun ApiKeyTestDialogWarningPreview() {
+    ApiKeyTestDialog(
+        isLoading = false,
+        title = "Warning",
+        message = "API returned SOME_OTHER_STATUS status",
+        rawResponse = "{\n   \"results\" : [],\n   \"status\" : \"SOME_OTHER_STATUS\"\n}",
+        onDismiss = {}
+    )
 }
 
 @Composable

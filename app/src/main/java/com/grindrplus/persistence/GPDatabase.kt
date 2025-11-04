@@ -8,16 +8,23 @@ import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.grindrplus.persistence.converters.DateConverter
 import com.grindrplus.persistence.dao.AlbumDao
+import com.grindrplus.persistence.dao.ProfilePhotoDao
 import com.grindrplus.persistence.dao.SavedPhraseDao
 import com.grindrplus.persistence.dao.TeleportLocationDao
 import com.grindrplus.persistence.model.AlbumContentEntity
 import com.grindrplus.persistence.model.AlbumEntity
 import com.grindrplus.persistence.model.SavedPhraseEntity
 import com.grindrplus.persistence.model.TeleportLocationEntity
+import android.database.sqlite.SQLiteDatabase
+import com.grindrplus.persistence.dao.LogDao
+import com.grindrplus.persistence.dao.ProfileDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.grindrplus.persistence.dao.ProfileViewDao // <-- NEW IMPORT
+import com.grindrplus.persistence.model.LogEntity
+import com.grindrplus.persistence.model.ProfileEntity
+import com.grindrplus.persistence.model.ProfilePhotoEntity
 import com.grindrplus.persistence.model.ProfileViewEntity // <-- NEW IMPORT
 
 @Database(
@@ -26,9 +33,12 @@ import com.grindrplus.persistence.model.ProfileViewEntity // <-- NEW IMPORT
         AlbumContentEntity::class,
         TeleportLocationEntity::class,
         SavedPhraseEntity::class,
-        ProfileViewEntity::class // <-- ADDED
+        ProfileViewEntity::class,
+        ProfilePhotoEntity::class,
+        ProfileEntity::class,
+        LogEntity::class
     ],
-    version = 1, // <-- INCREMENTED VERSION
+    version = 7, // <-- INCREMENTED VERSION
     exportSchema = false
 )
 
@@ -39,6 +49,31 @@ abstract class GPDatabase : RoomDatabase() {
     abstract fun savedPhraseDao(): SavedPhraseDao
 
     abstract fun profileViewDao(): ProfileViewDao
+
+    abstract fun profileDao(): ProfileDao
+
+    abstract fun profilePhotoDao(): ProfilePhotoDao
+
+    abstract fun logDao(): LogDao
+
+    object DatabaseManager {
+        private var isReady = false
+        private val pendingLogs = mutableListOf<() -> Unit>()
+
+        fun markReady() {
+            isReady = true
+            pendingLogs.forEach { it() }
+            pendingLogs.clear()
+        }
+
+        fun executeWhenReady(block: () -> Unit) {
+            if (isReady) {
+                block()
+            } else {
+                pendingLogs += block
+            }
+        }
+    }
 
     companion object {
         private const val DATABASE_NAME = "grindrplus.db"
@@ -63,7 +98,9 @@ abstract class GPDatabase : RoomDatabase() {
                     .fallbackToDestructiveMigration(false)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
+
                 INSTANCE = instance
+                DatabaseManager.markReady()
                 instance
             }
         }

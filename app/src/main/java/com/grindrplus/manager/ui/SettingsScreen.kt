@@ -283,6 +283,14 @@ fun SettingsScreen(
     }
 }
 
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun SettingsScreenPreview() {
+    SettingsScreen(
+        viewModel = com.grindrplus.manager.settings.rememberViewModel()
+    )
+}
+
 @Composable
 fun ResetSettingsDialog(
     onDismiss: () -> Unit,
@@ -347,6 +355,12 @@ fun ResetSettingsDialog(
             }
         }
     }
+}
+
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun ResetSettingsDialogPreview() {
+    ResetSettingsDialog(onDismiss = {}, onConfirm = {})
 }
 
 @Composable
@@ -478,6 +492,12 @@ fun AboutDialog(
     }
 }
 
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun AboutDialogPreview() {
+    AboutDialog(onDismiss = {}, onViewSourceCode = {})
+}
+
 @Composable
 fun SettingGroupSection(
     group: SettingGroup,
@@ -516,6 +536,25 @@ fun SettingGroupSection(
     }
 }
 
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun SettingGroupSectionPreview() {
+    val group = com.grindrplus.manager.settings.SettingGroup(
+        id = "preview_group",
+        title = "Preview Group",
+        settings = listOf(
+            com.grindrplus.manager.settings.SwitchSetting(
+                id = "switch_1",
+                title = "A switch setting",
+                description = "This is a description",
+                isChecked = true,
+                onCheckedChange = {}
+            )
+        )
+    )
+    SettingGroupSection(group = group, onSettingChanged = {})
+}
+
 @Composable
 fun ImprovedSettingItem(
     setting: Setting,
@@ -530,6 +569,23 @@ fun ImprovedSettingItem(
         else -> {}
     }
 }
+
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun ImprovedSettingItemPreview() {
+    val setting = com.grindrplus.manager.settings.SwitchSetting(
+        id = "switch_preview",
+        title = "Preview Switch",
+        description = "This is a preview switch setting.",
+        isChecked = true,
+        onCheckedChange = {}
+    )
+    ImprovedSettingItem(
+        setting = setting,
+        onSettingChanged = {}
+    )
+}
+
 @Composable
 fun ImprovedLocationListSetting(
     setting: com.grindrplus.manager.settings.LocationListSetting,
@@ -664,6 +720,25 @@ fun ImprovedLocationListSetting(
     }
 }
 
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun ImprovedLocationListSettingPreview() {
+    val setting = com.grindrplus.manager.settings.LocationListSetting(
+        id = "location_list_preview",
+        title = "Favorite Locations",
+        description = "Manage your favorite locations",
+        locations = listOf(
+            com.grindrplus.manager.settings.LocationData("Home", "34.0522", "-118.2437"),
+            com.grindrplus.manager.settings.LocationData("Work", "34.0532", "-118.2447")
+        ),
+        onLocationsChange = {}
+    )
+    ImprovedLocationListSetting(
+        setting = setting,
+        onChanged = {}
+    )
+}
+
 @Composable
 fun ImprovedSwitchSetting(
     setting: SwitchSetting,
@@ -713,6 +788,22 @@ fun ImprovedSwitchSetting(
             )
         )
     }
+}
+
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun ImprovedSwitchSettingPreview() {
+    val setting = com.grindrplus.manager.settings.SwitchSetting(
+        id = "switch_preview",
+        title = "Enable Feature",
+        description = "This will enable the new feature.",
+        isChecked = true,
+        onCheckedChange = {}
+    )
+    ImprovedSwitchSetting(
+        setting = setting,
+        onChanged = {}
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -899,6 +990,24 @@ fun ImprovedTextSetting(
             }
         }
     }
+}
+
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun ImprovedTextSettingPreview() {
+    val setting = com.grindrplus.manager.settings.TextSetting(
+        id = "text_preview",
+        title = "API Key",
+        description = "Enter your API key.",
+        value = "12345-abcde",
+        onValueChange = {},
+        keyboardType = com.grindrplus.manager.settings.KeyboardType.Text,
+        validator = null
+    )
+    ImprovedTextSetting(
+        setting = setting,
+        onChanged = {}
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1111,6 +1220,25 @@ fun ImprovedTextSettingWithButtons(
     }
 }
 
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun ImprovedTextSettingWithButtonsPreview() {
+    val setting = com.grindrplus.manager.settings.TextSettingWithButtons(
+        id = "text_with_buttons_preview",
+        title = "Custom Endpoint",
+        description = "Enter a custom endpoint URL.",
+        value = "https://example.com/api",
+        onValueChange = {},
+        buttons = listOf(
+            com.grindrplus.manager.settings.ButtonAction("Test", {})
+        )
+    )
+    ImprovedTextSettingWithButtons(
+        setting = setting,
+        onChanged = {}
+    )
+}
+
 @Composable
 fun ImprovedButtonSetting(setting: ButtonSetting) {
     Row(
@@ -1139,4 +1267,17 @@ fun ImprovedButtonSetting(setting: ButtonSetting) {
             Text("Open")
         }
     }
+}
+
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun ImprovedButtonSettingPreview() {
+    val setting = com.grindrplus.manager.settings.ButtonSetting(
+        id = "button_preview",
+        title = "Open Documentation",
+        onClick = {}
+    )
+    ImprovedButtonSetting(
+        setting = setting
+    )
 }

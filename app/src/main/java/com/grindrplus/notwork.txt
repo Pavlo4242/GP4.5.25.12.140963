@@ -103,7 +103,6 @@ object GrindrPlus {
         )
     )
 
-
     val currentActivity: Activity?
         get() = currentActivityRef?.get()
 
@@ -2006,7 +2005,6 @@ private fun logOutput(tag: String, message: String) {
     }
 }
 
-
 class Database(
     recipient: String,
     sender: String
@@ -3350,14 +3348,16 @@ import com.grindrplus.core.Config
 import com.grindrplus.core.Logger
 import com.grindrplus.core.TaskScheduler
 import com.grindrplus.core.Utils.coordsToGeoHash
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
+import timber.log.Timber
 
-class Location(recipient: String, sender: String) :
-    CommandModule("Location", recipient, sender) {
-
+class Location(recipient: String, sender: String) : CommandModule("Location", recipient, sender) {
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
     private val scheduler = TaskScheduler(coroutineScope)
 
@@ -3369,40 +3369,81 @@ class Location(recipient: String, sender: String) :
     }
 
     init {
+        // FIXED: Use coroutine to avoid blocking initialization
         coroutineScope.launch {
             try {
-                val saved = Config.get(STATIC_LOCATION_KEY, "") as String
-                if (saved.isNotEmpty()) {
+                val savedLocation = Config.get(STATIC_LOCATION_KEY, "") as String
+                if (savedLocation.isNotEmpty()) {
                     val interval = Config.get(STATIC_INTERVAL_KEY, DEFAULT_INTERVAL_MS) as Long
-                    startStaticTeleportTask(saved, interval)
-                    Logger.i("Static teleport restored: $saved every ${interval / 1000}s")
+                    startStaticTeleportTask(savedLocation, interval)
+                    Logger.i("Static Teleportation task re-started for $savedLocation every ${interval / 1000}s")
                 }
             } catch (e: Exception) {
-                Logger.e("Failed to restore static teleport: ${e.message}")
+                Logger.e("Failed to restart static teleport: ${e.message}")
+                // Clear invalid saved location to prevent future issues
                 Config.put(STATIC_LOCATION_KEY, "")
             }
         }
     }
 
+    /**
+     * Helper function to manage the periodic static teleport task.
+     */
+    private fun startStaticTeleportTask(coords: String, interval: Long) {
+        try {
+            // Cancel any existing task first
+            scheduler.cancelTask(STATIC_TELEPORT_TASK)
+
+            // Split and validate coordinates
+            val parts = coords.split(",")
+            if (parts.size != 2) {
+                Logger.e("Invalid format for static teleport: $coords")
+                Config.put(STATIC_LOCATION_KEY, "")
+                return
+            }
+
+            val lat = parts[0].trim().toDoubleOrNull()
+            val lon = parts[1].trim().toDoubleOrNull()
+
+            if (lat == null || lon == null) {
+                Logger.e("Invalid coordinate values: $coords")
+                Config.put(STATIC_LOCATION_KEY, "")
+                return
+            }
+
+            // Validate coordinate ranges
+            if (lat !in -90.0..90.0 || lon !in -180.0..180.0) {
+                Logger.e("Coordinates out of valid range: lat=$lat, lon=$lon")
+                Config.put(STATIC_LOCATION_KEY, "")
+                return
+            }
+
+            // Start the periodic task
+            scheduler.periodic(STATIC_TELEPORT_TASK, interval) {
+                try {
+                    teleportToCoordinates(lat, lon, silent = true)
+                    Logger.i("Periodic static teleport to $lat, $lon")
+                } catch (e: Exception) {
+                    Logger.e("Error during periodic teleport: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.e("Failed to start static teleport task: ${e.message}")
+            Config.put(STATIC_LOCATION_KEY, "")
+        }
+    }
+
     @Command(name = "tp", aliases = ["tp"], help = "Teleport to a location")
-    fun teleport(args: List<String>) = teleportCommand(Mode.NORMAL, args)
-
-    @Command(
-        name = "tpS",
-        aliases = ["tps"],
-        help = "Static teleport (re-send every N seconds)"
-    )
-    fun teleportStatic(args: List<String>) = teleportCommand(Mode.STATIC, args)
-
-    private enum class Mode { NORMAL, STATIC }
-
-    private fun teleportCommand(mode: Mode, rawArgs: List<String>) {
-        // ---------- 1. forced-coordinates guard ----------
+    fun teleport(args: List<String>) {
+        // Check if forced coordinates are enabled
         if (Config.get("forced_coordinates", "") as String != "") {
             GrindrPlus.runOnMainThreadWithCurrentActivity { activity ->
                 AlertDialog.Builder(activity)
-                    .setTitle("${if (mode == Mode.STATIC) "Static " else ""}Teleport disabled")
-                    .setMessage("Forced coordinates are active – disable them first.")
+                    .setTitle("Teleportation disabled")
+                    .setMessage(
+                        "GrindrPlus is currently using forced coordinates. " +
+                                "Please disable it to use teleportation."
+                    )
                     .setPositiveButton("OK", null)
                     .setNegativeButton("Disable") { _, _ ->
                         Config.put("forced_coordinates", "")
@@ -3414,184 +3455,230 @@ class Location(recipient: String, sender: String) :
             return
         }
 
-        // ---------- 2. parse interval (only for STATIC) ----------
-        var intervalMs = if (mode == Mode.STATIC) DEFAULT_INTERVAL_MS else 0L
-        val args = rawArgs.toMutableList()
-
-        if (mode == Mode.STATIC && args.size > 1) {
-            args.last().toLongOrNull()?.let {
-                intervalMs = it * 1000
-                args.removeAt(args.size - 1)
+        // Toggle teleportation if no arguments
+        if (args.isEmpty()) {
+            val status = (Config.get("current_location", "") as String).isEmpty()
+            if (!status) {
+                Config.put("current_location", "")
+                return GrindrPlus.showToast(Toast.LENGTH_LONG, "Teleportation disabled")
             }
+            return GrindrPlus.showToast(Toast.LENGTH_LONG, "Please provide a location")
         }
 
-        val argsJoined = args.joinToString(" ")
-
-        // ---------- 3. "off" / empty-arg handling ----------
+        // Handle different location formats
         when {
-            argsJoined.equals("off", ignoreCase = true) -> {
-                if (mode == Mode.STATIC) {
-                    scheduler.cancelTask(STATIC_TELEPORT_TASK)
-                    Config.put(STATIC_LOCATION_KEY, "")
-                    LocationCache.clear()
-                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Static teleport disabled")
-                } else {
-                    Config.put("current_location", "")
-                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Teleport disabled")
-                }
-                return
+            args.size == 1 && args[0] == "off" -> {
+                Config.put("current_location", "")
+                return GrindrPlus.showToast(Toast.LENGTH_LONG, "Teleportation disabled")
             }
+            args.size == 1 && args[0].contains(",") -> {
+                val parts = args[0].split(",")
+                val lat = parts[0].trim().toDoubleOrNull()
+                val lon = parts.getOrNull(1)?.trim()?.toDoubleOrNull()
 
-            args.isEmpty() -> {
-                if (mode == Mode.STATIC) {
-                    val running = scheduler.isTaskRunning(STATIC_TELEPORT_TASK)
-                    if (running) {
-                        scheduler.cancelTask(STATIC_TELEPORT_TASK)
-                        Config.put(STATIC_LOCATION_KEY, "")
-                        LocationCache.clear()
-                        GrindrPlus.showToast(Toast.LENGTH_LONG, "Static teleport disabled")
+                if (lat != null && lon != null) {
+                    teleportToCoordinates(lat, lon)
+                } else {
+                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Invalid coordinates format")
+                }
+            }
+            args.size == 2 && args.all { arg -> arg.toDoubleOrNull() != null } -> {
+                val lat = args[0].toDouble()
+                val lon = args[1].toDouble()
+                teleportToCoordinates(lat, lon)
+            }
+            else -> {
+                // Location name - resolve via saved locations or API
+                coroutineScope.launch {
+                    val location = getLocation(args.joinToString(" "))
+                    if (location != null) {
+                        teleportToCoordinates(location.first, location.second)
                     } else {
-                        val saved = Config.get(STATIC_LOCATION_KEY, "") as String
-                        if (saved.isNotEmpty()) {
-                            val savedInt = Config.get(STATIC_INTERVAL_KEY, DEFAULT_INTERVAL_MS) as Long
-                            startStaticTeleportTask(saved, savedInt)
-                            GrindrPlus.showToast(
-                                Toast.LENGTH_LONG,
-                                "Static teleport re-enabled (${savedInt / 1000}s)"
-                            )
+                        val apiLocation = getLocationFromNominatimAsync(args.joinToString(" "))
+                        if (apiLocation != null) {
+                            teleportToCoordinates(apiLocation.first, apiLocation.second)
                         } else {
-                            GrindrPlus.showToast(Toast.LENGTH_LONG, "Use /tpS <location> [seconds]")
+                            GrindrPlus.showToast(Toast.LENGTH_LONG, "Location not found")
                         }
                     }
-                } else {
-                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Use /tp <location> or /tp off")
                 }
-                return
-            }
-        }
-
-        // ---------- 4. direct coordinates ----------
-        val directCoords: Pair<Double, Double>? = when {
-            args.size == 1 && args[0].contains(",") -> {
-                val p = args[0].split(",")
-                val lat = p[0].trim().toDoubleOrNull()
-                val lon = p.getOrNull(1)?.trim()?.toDoubleOrNull()
-                if (lat != null && lon != null) lat to lon else null
-            }
-
-            args.size == 2 && args.all { it.toDoubleOrNull() != null } -> {
-                args[0].toDouble() to args[1].toDouble()
-            }
-
-            else -> null
-        }
-
-        if (directCoords != null) {
-            val (lat, lon) = directCoords
-            if (mode == Mode.STATIC) {
-                val coordStr = "$lat,$lon"
-                Config.put(STATIC_LOCATION_KEY, coordStr)
-                Config.put(STATIC_INTERVAL_KEY, intervalMs)
-                startStaticTeleportTask(coordStr, intervalMs)
-                GrindrPlus.showToast(
-                    Toast.LENGTH_LONG,
-                    "Static teleport to $lat,$lon (${intervalMs / 1000}s)"
-                )
-            } else {
-                teleportToCoordinates(lat, lon)
-            }
-            return
-        }
-
-        // ---------- 5. resolve name → coordinates ----------
-        coroutineScope.launch {
-            val resolved = getLocation(argsJoined) ?: getLocationFromNominatimAsync(argsJoined)
-            if (resolved == null) {
-                GrindrPlus.showToast(Toast.LENGTH_LONG, "Location not found")
-                return@launch
-            }
-
-            val (lat, lon) = resolved
-            val coordStr = "$lat,$lon"
-
-            if (mode == Mode.STATIC) {
-                Config.put(STATIC_LOCATION_KEY, coordStr)
-                Config.put(STATIC_INTERVAL_KEY, intervalMs)
-                startStaticTeleportTask(coordStr, intervalMs)
-                GrindrPlus.showToast(
-                    Toast.LENGTH_LONG,
-                    "Static teleport to $coordStr (${intervalMs / 1000}s)"
-                )
-            } else {
-                teleportToCoordinates(lat, lon)
             }
         }
     }
 
-    private fun startStaticTeleportTask(coordStr: String, interval: Long) {
-        scheduler.cancelTask(STATIC_TELEPORT_TASK)
-
-        val parts = coordStr.split(",")
-        if (parts.size != 2) {
-            Logger.e("Bad static coord format: $coordStr")
-            Config.put(STATIC_LOCATION_KEY, "")
-            return
-        }
-
-        val lat = parts[0].trim().toDoubleOrNull()
-        val lon = parts[1].trim().toDoubleOrNull()
-        if (lat == null || lon == null || lat !in -90.0..90.0 || lon !in -180.0..180.0) {
-            Logger.e("Invalid static coordinates: $coordStr")
-            Config.put(STATIC_LOCATION_KEY, "")
-            return
-        }
-
-        scheduler.periodic(STATIC_TELEPORT_TASK, interval) {
-            try {
-                teleportToCoordinates(lat, lon, silent = true)
-                Logger.i("Static teleport tick → $lat,$lon")
-            } catch (e: Exception) {
-                Logger.e("Static teleport tick failed: ${e.message}")
+    @Command(name = "tpS", aliases = ["tps"], help = "Teleport to a location and periodically resend coordinates (default 90s, customize: /tpS lat,lon 60)")
+    fun teleportStatic(args: List<String>) {
+        // Check if forced coordinates are enabled
+        if (Config.get("forced_coordinates", "") as String != "") {
+            GrindrPlus.runOnMainThreadWithCurrentActivity { activity ->
+                AlertDialog.Builder(activity)
+                    .setTitle("Static Teleportation disabled")
+                    .setMessage(
+                        "GrindrPlus is currently using forced coordinates. " +
+                                "Please disable it to use static teleportation."
+                    )
+                    .setPositiveButton("OK", null)
+                    .setNegativeButton("Disable") { _, _ ->
+                        Config.put("forced_coordinates", "")
+                        GrindrPlus.bridgeClient.deleteForcedLocation(packageName)
+                        GrindrPlus.showToast(Toast.LENGTH_LONG, "Forced coordinates disabled")
+                    }
+                    .show()
             }
+            return
+        }
+
+        // Parse arguments
+        var locationString: String? = null
+        var intervalMs = DEFAULT_INTERVAL_MS
+        val locationArgs = mutableListOf<String>()
+
+        // Check if last argument is an interval
+        val potentialInterval = args.lastOrNull()?.toLongOrNull()
+        if (potentialInterval != null && args.size > 1) {
+            val restOfArgs = args.dropLast(1).joinToString(" ")
+            if (!restOfArgs.equals("off", ignoreCase = true)) {
+                intervalMs = potentialInterval * 1000
+                locationArgs.addAll(args.dropLast(1))
+            } else {
+                locationArgs.addAll(args)
+            }
+        } else {
+            locationArgs.addAll(args)
+        }
+
+        val argsJoined = locationArgs.joinToString(" ")
+
+        when {
+            // No arguments - toggle current state
+            args.isEmpty() -> {
+                val isRunning = scheduler.isTaskRunning(STATIC_TELEPORT_TASK)
+                if (isRunning) {
+                    scheduler.cancelTask(STATIC_TELEPORT_TASK)
+                    Config.put(STATIC_LOCATION_KEY, "")
+                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Static Teleportation disabled")
+                } else {
+                    val savedCoords = Config.get(STATIC_LOCATION_KEY, "") as String
+                    if (savedCoords.isNotEmpty()) {
+                        val savedInterval = Config.get(STATIC_INTERVAL_KEY, DEFAULT_INTERVAL_MS) as Long
+                        startStaticTeleportTask(savedCoords, savedInterval)
+                        GrindrPlus.showToast(
+                            Toast.LENGTH_LONG,
+                            "Static Teleportation re-enabled (${savedInterval / 1000}s)"
+                        )
+                    } else {
+                        GrindrPlus.showToast(
+                            Toast.LENGTH_LONG,
+                            "Please provide a location (e.g., /tpS 37.7749,-122.4194 60)"
+                        )
+                    }
+                }
+            }
+            // Turn off static teleportation
+            argsJoined.equals("off", ignoreCase = true) -> {
+                scheduler.cancelTask(STATIC_TELEPORT_TASK)
+                Config.put(STATIC_LOCATION_KEY, "")
+                GrindrPlus.showToast(Toast.LENGTH_LONG, "Static Teleportation disabled")
+            }
+            // "lat,lon" format
+            locationArgs.size == 1 && locationArgs[0].contains(",") -> {
+                val parts = locationArgs[0].split(",")
+                val lat = parts[0].trim().toDoubleOrNull()
+                val lon = parts.getOrNull(1)?.trim()?.toDoubleOrNull()
+
+                if (lat != null && lon != null) {
+                    locationString = "$lat,$lon"
+                } else {
+                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Invalid coordinates format")
+                    return
+                }
+            }
+            // "lat lon" format
+            locationArgs.size == 2 && locationArgs.all { it.toDoubleOrNull() != null } -> {
+                val lat = locationArgs[0].toDouble()
+                val lon = locationArgs[1].toDouble()
+                locationString = "$lat,$lon"
+            }
+            // Location name - needs resolution
+            else -> {
+                coroutineScope.launch {
+                    val resolvedLocation = getLocation(argsJoined)
+                        ?: getLocationFromNominatimAsync(argsJoined)
+
+                    if (resolvedLocation != null) {
+                        val coords = "${resolvedLocation.first},${resolvedLocation.second}"
+                        Config.put(STATIC_LOCATION_KEY, coords)
+                        Config.put(STATIC_INTERVAL_KEY, intervalMs)
+                        startStaticTeleportTask(coords, intervalMs)
+                        GrindrPlus.showToast(
+                            Toast.LENGTH_LONG,
+                            "Static Teleported to $coords (${intervalMs / 1000}s)"
+                        )
+                    } else {
+                        GrindrPlus.showToast(Toast.LENGTH_LONG, "Location not found")
+                    }
+                }
+                return
+            }
+        }
+
+        // Save and start static teleport for coordinate formats
+        if (locationString != null) {
+            Config.put(STATIC_LOCATION_KEY, locationString)
+            Config.put(STATIC_INTERVAL_KEY, intervalMs)
+            startStaticTeleportTask(locationString, intervalMs)
+            GrindrPlus.showToast(
+                Toast.LENGTH_LONG,
+                "Static Teleported to $locationString (${intervalMs / 1000}s)"
+            )
         }
     }
 
     @Command(name = "save", aliases = ["sv"], help = "Save the current location")
     fun save(args: List<String>) {
         if (args.isEmpty()) {
-            GrindrPlus.showToast(Toast.LENGTH_LONG, "Provide a name")
+            GrindrPlus.showToast(Toast.LENGTH_LONG, "Please provide a name for the location")
             return
         }
+
         val name = args[0]
 
         coroutineScope.launch {
-            val coordStr = when {
+            val location = when {
                 args.size == 1 -> Config.get("current_location", "") as String
                 args.size == 2 && args[1].contains(",") -> args[1]
                 args.size == 3 && args[1].toDoubleOrNull() != null && args[2].toDoubleOrNull() != null ->
                     "${args[1]},${args[2]}"
-
-                args.size > 1 -> getLocationFromNominatimAsync(args.drop(1).joinToString(" "))
-                    ?.let { "${it.first},${it.second}" }
-
+                args.size > 1 ->
+                    getLocationFromNominatimAsync(args.drop(1).joinToString(" "))?.let {
+                        "${it.first},${it.second}"
+                    }
                 else -> ""
             }
 
-            if (coordStr.isNullOrBlank() || !coordStr.contains(",")) {
-                GrindrPlus.showToast(Toast.LENGTH_LONG, "Invalid coordinates")
-                return@launch
-            }
+            if (!location.isNullOrEmpty()) {
+                val coordinates = location.split(",")
+                if (coordinates.size == 2) {
+                    try {
+                        val lat = coordinates[0].trim().toDouble()
+                        val lon = coordinates[1].trim().toDouble()
 
-            val (lat, lon) = coordStr.split(",").let {
-                it[0].trim().toDouble() to it[1].trim().toDouble()
-            }
-
-            if (getLocation(name) != null) {
-                updateLocation(name, lat, lon)
-                GrindrPlus.showToast(Toast.LENGTH_LONG, "Updated $name")
+                        val existingLocation = getLocation(name)
+                        if (existingLocation != null) {
+                            updateLocation(name, lat, lon)
+                            GrindrPlus.showToast(Toast.LENGTH_LONG, "Successfully updated $name")
+                        } else {
+                            addLocation(name, lat, lon)
+                            GrindrPlus.showToast(Toast.LENGTH_LONG, "Successfully saved $name")
+                        }
+                    } catch (e: Exception) {
+                        GrindrPlus.showToast(Toast.LENGTH_LONG, "Invalid coordinates format")
+                    }
+                } else {
+                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Invalid coordinates format")
+                }
             } else {
-                addLocation(name, lat, lon)
-                GrindrPlus.showToast(Toast.LENGTH_LONG, "Saved $name")
+                GrindrPlus.showToast(Toast.LENGTH_LONG, "No location provided")
             }
         }
     }
@@ -3599,67 +3686,90 @@ class Location(recipient: String, sender: String) :
     @Command(name = "delete", aliases = ["del"], help = "Delete a saved location")
     fun delete(args: List<String>) {
         if (args.isEmpty()) {
-            GrindrPlus.showToast(Toast.LENGTH_LONG, "Provide a name")
-            return
+            return GrindrPlus.showToast(Toast.LENGTH_LONG, "Please provide a location to delete")
         }
+
         val name = args.joinToString(" ")
+
         coroutineScope.launch {
-            if (getLocation(name) == null) {
+            val location = getLocation(name)
+            if (location == null) {
                 GrindrPlus.showToast(Toast.LENGTH_LONG, "Location not found")
                 return@launch
             }
+
             deleteLocation(name)
-            GrindrPlus.showToast(Toast.LENGTH_LONG, "Deleted $name")
+            GrindrPlus.showToast(Toast.LENGTH_LONG, "Location deleted")
         }
     }
 
     private suspend fun getLocation(name: String): Pair<Double, Double>? =
         withContext(Dispatchers.IO) {
-            val dao = GrindrPlus.database.teleportLocationDao()
-            dao.getLocation(name)?.let { Pair(it.latitude, it.longitude) }
+            val locationDao = GrindrPlus.database.teleportLocationDao()
+            val entity = locationDao.getLocation(name)
+            Timber.d("Location Retrieved")
+            return@withContext entity?.let { Pair(it.latitude, it.longitude) }
         }
 
-    private suspend fun addLocation(name: String, lat: Double, lon: Double) =
+    private suspend fun addLocation(name: String, latitude: Double, longitude: Double) =
         withContext(Dispatchers.IO) {
-            val dao = GrindrPlus.database.teleportLocationDao()
-            dao.upsertLocation(
-                com.grindrplus.persistence.model.TeleportLocationEntity(
-                    name = name, latitude = lat, longitude = lon
-                )
+            val locationDao = GrindrPlus.database.teleportLocationDao()
+            val entity = com.grindrplus.persistence.model.TeleportLocationEntity(
+                name = name,
+                latitude = latitude,
+                longitude = longitude
             )
+            locationDao.upsertLocation(entity)
         }
 
-    private suspend fun updateLocation(name: String, lat: Double, lon: Double) =
+    private suspend fun updateLocation(name: String, latitude: Double, longitude: Double) =
         withContext(Dispatchers.IO) {
-            addLocation(name, lat, lon)
+            val locationDao = GrindrPlus.database.teleportLocationDao()
+            val entity = com.grindrplus.persistence.model.TeleportLocationEntity(
+                name = name,
+                latitude = latitude,
+                longitude = longitude
+            )
+            locationDao.upsertLocation(entity)
         }
 
-    private suspend fun deleteLocation(name: String) = withContext(Dispatchers.IO) {
-        GrindrPlus.database.teleportLocationDao().deleteLocation(name)
-    }
+    private suspend fun deleteLocation(name: String) =
+        withContext(Dispatchers.IO) {
+            val locationDao = GrindrPlus.database.teleportLocationDao()
+            locationDao.deleteLocation(name)
+        }
 
     private suspend fun getLocationFromNominatimAsync(location: String): Pair<Double, Double>? =
         withContext(Dispatchers.IO) {
             val url = "https://nominatim.openstreetmap.org/search?q=${Uri.encode(location)}&format=json"
+            val randomUserAgent = getUserAgent()
             val request = okhttp3.Request.Builder()
                 .url(url)
-                .header("User-Agent", getUserAgent())
+                .header("User-Agent", randomUserAgent)
                 .build()
 
-            try {
-                OkHttpClient().newCall(request).execute().use { resp ->
-                    val body = resp.body?.string() ?: return@withContext null
+            return@withContext try {
+                OkHttpClient().newCall(request).execute().use { response ->
+                    val body = response.body?.string()
+                    if (body.isNullOrEmpty()) return@withContext null
+
                     val json = JSONArray(body)
                     if (json.length() == 0) return@withContext null
+
                     val obj = json.getJSONObject(0)
-                    Pair(obj.getDouble("lat"), obj.getDouble("lon"))
+                    val lat = obj.getDouble("lat")
+                    val lon = obj.getDouble("lon")
+                    Pair(lat, lon)
                 }
             } catch (e: Exception) {
-                val msg = "Nominatim error: ${e.message}"
+                val message = "Error getting location: ${e.message ?: "Unknown error"}"
                 withContext(Dispatchers.Main) {
-                    GrindrPlus.showToast(Toast.LENGTH_LONG, msg)
+                    GrindrPlus.showToast(Toast.LENGTH_LONG, message)
                 }
-                Logger.e(msg)
+                Logger.apply {
+                    e(message)
+                    writeRaw(e.stackTraceToString())
+                }
                 null
             }
         }
@@ -3667,47 +3777,61 @@ class Location(recipient: String, sender: String) :
     private suspend fun getNearestLocationNameFromCoords(lat: Double, lon: Double): String? =
         withContext(Dispatchers.IO) {
             val url = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&addressdetails=1"
+            val randomUserAgent = getUserAgent()
             val request = okhttp3.Request.Builder()
                 .url(url)
-                .header("User-Agent", getUserAgent())
+                .header("User-Agent", randomUserAgent)
                 .build()
 
-            try {
-                OkHttpClient().newCall(request).execute().use { resp ->
-                    if (!resp.isSuccessful) return@use null
-                    val body = resp.body?.string() ?: return@use null
+            return@withContext try {
+                OkHttpClient().newCall(request).execute().use { response ->
+                    val body = response.body?.string()
+                    if (body.isNullOrEmpty()) return@withContext null
+
                     val json = JSONObject(body)
-                    if (json.has("error")) return@use null
+                    if (json.has("error")) return@withContext null
 
+                    // Extract the display name or specific address components
+                    val displayName = json.optString("display_name", null)
                     val address = json.optJSONObject("address")
-                    val display = json.optString("display_name").takeIf { it.isNotBlank() }
 
-                    fun String?.nonEmpty() = this?.takeIf { it.isNotBlank() }
-
-                    val name = when {
-                        address?.optString("village").nonEmpty() != null -> address.optString("village")
-                        address?.optString("town").nonEmpty() != null -> address.optString("town")
-                        address?.optString("city").nonEmpty() != null -> address.optString("city")
-                        address?.optString("municipality").nonEmpty() != null -> address.optString("municipality")
-                        address?.optString("county").nonEmpty() != null -> address.optString("county")
-                        address?.optString("state").nonEmpty() != null -> address.optString("state")
-                        address?.optString("country").nonEmpty() != null -> address.optString("country")
-                        display != null -> display
+                    // Try to get specific meaningful names in priority order
+                    val locationName = when {
+                        address?.optString("village") != null -> address.getString("village")
+                        address?.optString("town") != null -> address.getString("town")
+                        address?.optString("city") != null -> address.getString("city")
+                        address?.optString("municipality") != null -> address.getString("municipality")
+                        address?.optString("county") != null -> address.getString("county")
+                        address?.optString("state") != null -> address.getString("state")
+                        address?.optString("country") != null -> address.getString("country")
+                        !displayName.isNullOrEmpty() -> displayName
                         else -> null
                     }
 
-                    name?.also { Logger.i("Resolved name: $it") } ?: Logger.w("No name")
-                    name
+                    locationName
                 }
             } catch (e: Exception) {
-                val msg = "Reverse-geocode error: ${e.message}"
+                val message = "Error getting location name: ${e.message ?: "Unknown error"}"
                 withContext(Dispatchers.Main) {
-                    GrindrPlus.showToast(Toast.LENGTH_LONG, msg)
+                    GrindrPlus.showToast(Toast.LENGTH_LONG, message)
                 }
-                Logger.e(msg)
+                Logger.apply {
+                    e(message)
+                    writeRaw(e.stackTraceToString())
+                }
                 null
             }
         }
+
+    /*private suspend fun storeLocationName(lat: Double, lon: Double) {
+        val locationName = getNearestLocationNameFromCoords(lat, lon)
+        locationName?.let { name ->
+            // Store the name wherever you need it
+            // For example: shared preferences, database, variable, etc.
+            preferences.edit().putString("last_location_name", name).apply()
+            println("Nearest location: $name")
+        }
+    }*/
 
     private fun teleportToCoordinates(lat: Double, lon: Double, silent: Boolean = false) {
         Config.put("current_location", "$lat,$lon")
@@ -3717,23 +3841,19 @@ class Location(recipient: String, sender: String) :
             try {
                 GrindrPlus.httpClient.updateLocation(geohash)
             } catch (e: Exception) {
-                Logger.e("Geohash send failed: ${e.message}")
+                Logger.e("Error sending geohash to API: ${e.message}")
+
             }
         }
 
+        // Launch coroutine to get and log location name
         coroutineScope.launch {
-            val cached = LocationCache.get(lat, lon)
-            if (cached != null) {
-                Logger.i("Teleport to $lat,$lon – $cached")
-                return@launch
-            }
-
-            val name = getNearestLocationNameFromCoords(lat, lon)
-            if (name != null) {
-                LocationCache.put(lat, lon, name)
-                Logger.i("Teleport to $lat,$lon – $name (fresh)")
+            val locationName = getNearestLocationNameFromCoords(lat, lon)
+            if (locationName != null) {
+                Logger.i("Teleported to $lat, $lon - Nearest location: $locationName")
+                Timber.v("Teleportated to $locationName")
             } else {
-                Logger.i("Teleport to $lat,$lon – name unavailable")
+                Logger.i("Teleported to $lat, $lon - Location name not available")
             }
         }
 
@@ -3742,64 +3862,46 @@ class Location(recipient: String, sender: String) :
             Logger.i("Teleported to $lat, $lon")
         }
     }
-
     private fun getUserAgent(): String {
-        val chrome = listOf("120.0.0.0", "119.0.0.0", "118.0.0.0", "117.0.0.0", "116.0.0.0")
-        val firefox = listOf("121.0", "120.0", "119.0", "118.0", "117.0")
-        val safari = listOf("17.2", "17.1", "17.0", "16.6", "16.5")
-        val edge = listOf("120.0.0.0", "119.0.0.0", "118.0.0.0", "117.0.0.0")
-        val win = listOf("10.0", "11.0")
-        val mac = listOf("10_15_7", "11_7_10", "12_7_2", "13_6_3", "14_2_1")
+        val chromeVersions = listOf("120.0.0.0", "119.0.0.0", "118.0.0.0", "117.0.0.0", "116.0.0.0")
+        val firefoxVersions = listOf("121.0", "120.0", "119.0", "118.0", "117.0")
+        val safariVersions = listOf("17.2", "17.1", "17.0", "16.6", "16.5")
+        val edgeVersions = listOf("120.0.0.0", "119.0.0.0", "118.0.0.0", "117.0.0.0")
+        val windowsVersions = listOf("10.0", "11.0")
+        val macVersions = listOf("10_15_7", "11_7_10", "12_7_2", "13_6_3", "14_2_1")
 
         return when ((1..5).random()) {
-            1 -> "Mozilla/5.0 (Windows NT ${win.random()}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome.random()} Safari/537.36"
-            2 -> "Mozilla/5.0 (Macintosh; Intel Mac OS X ${mac.random()}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome.random()} Safari/537.36"
+            1 -> {
+                val version = chromeVersions.random()
+                val winVer = windowsVersions.random()
+                "Mozilla/5.0 (Windows NT $winVer; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$version Safari/537.36"
+            }
+            2 -> {
+                val version = chromeVersions.random()
+                val macVer = macVersions.random()
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X $macVer) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$version Safari/537.36"
+            }
             3 -> {
-                val v = firefox.random()
-                val platform = if ((1..2).random() == 1) "Windows NT ${win.random()}; Win64; x64"
-                else "Macintosh; Intel Mac OS X ${mac.random().replace("_", ".")}"
-                "Mozilla/5.0 ($platform; rv:$v) Gecko/20100101 Firefox/$v"
+                val version = firefoxVersions.random()
+                val platform = if ((1..2).random() == 1) {
+                    "Windows NT ${windowsVersions.random()}; Win64; x64"
+                } else {
+                    "Macintosh; Intel Mac OS X ${macVersions.random().replace("_", ".")}"
+                }
+                "Mozilla/5.0 ($platform; rv:$version) Gecko/20100101 Firefox/$version"
             }
             4 -> {
-                val s = safari.random()
-                val m = mac.random()
-                val w = "605.1.${(10..20).random()}"
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X $m) AppleWebKit/$w (KHTML, like Gecko) Version/$s Safari/$w"
+                val safariVer = safariVersions.random()
+                val macVer = macVersions.random()
+                val webkitVer = "605.1.${(10..20).random()}"
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X $macVer) AppleWebKit/$webkitVer (KHTML, like Gecko) Version/$safariVer Safari/$webkitVer"
             }
-            5 -> "Mozilla/5.0 (Windows NT ${win.random()}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${edge.random()} Safari/537.36 Edg/${edge.random()}"
-            else -> chrome.random()
-        }
-    }
-
-    object LocationCache {
-        private const val KEY_COORDS = "cached_coords"
-        private const val KEY_NAME = "cached_name"
-        private const val KEY_TS = "cached_ts"
-
-        private val prefs get() = GrindrPlus.context.getSharedPreferences("grindrplus_location_cache", 0)
-
-        fun get(lat: Double, lon: Double, maxAgeMs: Long = 24 * 60 * 60 * 1000): String? {
-            val saved = prefs.getString(KEY_COORDS, null) ?: return null
-            if (saved != "$lat,$lon") return null
-            val ts = prefs.getLong(KEY_TS, 0)
-            if ((System.currentTimeMillis() - ts) > maxAgeMs) return null
-            return prefs.getString(KEY_NAME, null)
-        }
-
-        fun put(lat: Double, lon: Double, name: String) {
-            prefs.edit()
-                .putString(KEY_COORDS, "$lat,$lon")
-                .putString(KEY_NAME, name)
-                .putLong(KEY_TS, System.currentTimeMillis())
-                .apply()
-        }
-
-        fun clear() {
-            prefs.edit()
-                .remove(KEY_COORDS)
-                .remove(KEY_NAME)
-                .remove(KEY_TS)
-                .apply()
+            5 -> {
+                val version = edgeVersions.random()
+                val winVer = windowsVersions.random()
+                "Mozilla/5.0 (Windows NT $winVer; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$version Safari/537.36 Edg/$version"
+            }
+            else -> chromeVersions.random()
         }
     }
 } 
@@ -4618,76 +4720,6 @@ object CoroutineHelper {
         )
     }
 } 
---- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\core\CredentialsLogger.kt --- 
-package com.grindrplus.core
-
-import android.os.Environment
-import android.util.Base64
-import com.grindrplus.GrindrPlus
-import com.grindrplus.persistence.GPDatabase
-import com.grindrplus.persistence.model.LogEntity
-import org.json.JSONObject
-import java.io.File
-
-object CredentialsLogger {
-    private val logFile = File(
-        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-        "GrindrAccess_Info.txt"
-    )
-    private var lastAuthToken: String? = null
-
-    private fun getProfileIdFromToken(token: String): String? {
-        return try {
-            val parts = token.split(".")
-            if (parts.size < 2) return null
-            val payload = String(Base64.decode(parts[1], Base64.URL_SAFE), Charsets.UTF_8)
-            JSONObject(payload).getString("profileId")
-        } catch (e: Exception) {
-            Logger.e("Could not extract profileId from token: ${e.message}")
-            null
-        }
-    }
-
-    fun log(authToken: String?, lDeviceInfo: String?, userAgent: String?) {
-        if (authToken.isNullOrEmpty() || !authToken.startsWith("Grindr3 ")) return
-
-        val cleanAuthToken = authToken.substringAfter("Grindr3 ")
-        if (cleanAuthToken == lastAuthToken) return
-        GPDatabase.DatabaseManager.executeWhenReady {
-            try {
-                val profileId = getProfileIdFromToken(cleanAuthToken)
-
-                val logMessage = buildString {
-                    append("### Latest Grindr Credentials ###\n\n")
-                    append("# This file is automatically updated when your session token changes.\n")
-                    append("# Use these values in your grindr-access scripts.\n\n")
-                    append("profileId: $profileId\n\n")
-                    append("authToken: $cleanAuthToken\n\n")
-                    append("l-device-info: $lDeviceInfo\n\n")
-                    append("user-agent: $userAgent\n")
-                }
-
-                logFile.writeText(logMessage)
-                lastAuthToken = cleanAuthToken
-
-                // Also save to database
-                GrindrPlus.executeAsync {
-                    val entity = LogEntity(
-                        timestamp = System.currentTimeMillis(),
-                        log_type = "credentials",
-                        profile_id = profileId,
-                        auth_token = cleanAuthToken,
-                        device_info = lDeviceInfo,
-                        user_agent = userAgent
-                    )
-                    GrindrPlus.database.logDao().insert(entity)
-                }
-            } catch (e: Exception) {
-                Logger.e("Failed to write credentials: ${e.message}")
-            }
-        }
-    }
-} 
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\core\DatabaseHelper.kt --- 
 package com.grindrplus.core
 
@@ -4908,60 +4940,6 @@ object EventManager {
                 Logger.d("Server notification event emitted: $typeValue", LogSource.MODULE)
             } catch (e: Exception) {
                 Logger.e("Failed to emit server notification event: ${e.message}", LogSource.MODULE)
-            }
-        }
-    }
-} 
---- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\core\HttpLogger.kt --- 
-package com.grindrplus.core
-
-import com.grindrplus.GrindrPlus
-import com.grindrplus.persistence.GPDatabase
-import com.grindrplus.persistence.model.LogEntity
-import okhttp3.Request
-import okhttp3.Response
-import okio.Buffer
-
-object HttpLogger {
-    private fun formatHeaders(headers: okhttp3.Headers): String {
-        return headers.toMultimap().entries.joinToString("\n") { (key, values) ->
-            "    $key: ${values.joinToString(", ")}"
-        }.ifEmpty { "    (No headers)" }
-    }
-
-    private fun getRequestBody(request: Request): String {
-        return try {
-            val buffer = Buffer()
-            request.body?.writeTo(buffer)
-            buffer.readUtf8()
-        } catch (e: Exception) {
-            "(Error reading body: ${e.message})"
-        }
-    }
-
-    fun log(request: Request, response: Response) {
-        if (!(Config.get("enable_http_logging", false) as Boolean)) return
-
-        GPDatabase.DatabaseManager.executeWhenReady {
-            try {
-                val responseBody = response.peekBody(Long.MAX_VALUE).string()
-
-                GrindrPlus.executeAsync {
-                    val entity = LogEntity(
-                        timestamp = System.currentTimeMillis(),
-                        log_type = "http",
-                        url = request.url.toString(),
-                        method = request.method,
-                        request_headers = formatHeaders(request.headers),
-                        request_body = if (request.body != null) getRequestBody(request) else null,
-                        response_code = response.code,
-                        response_headers = formatHeaders(response.headers),
-                        response_body = responseBody.takeIf { it.isNotEmpty() }
-                    )
-                    GrindrPlus.database.logDao().insert(entity)
-                }
-            } catch (e: Exception) {
-                Logger.e("Failed to log HTTP request: ${e.message}")
             }
         }
     }
@@ -5731,33 +5709,6 @@ object Utils {
             Logger.apply {
                 e(message)
                 writeRaw(e.stackTraceToString())
-            }
-        }
-    }
-} 
---- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\core\WssAuthLogger.kt --- 
-package com.grindrplus.core
-
-import com.grindrplus.GrindrPlus
-import com.grindrplus.persistence.GPDatabase
-import com.grindrplus.persistence.model.LogEntity
-
-object WssAuthLogger {
-    fun log(profileId: String, xmppToken: String) {
-        if (!(Config.get("enable_wss_logging", false) as Boolean)) return
-        GPDatabase.DatabaseManager.executeWhenReady {
-            try {
-                GrindrPlus.executeAsync {
-                    val entity = LogEntity(
-                        timestamp = System.currentTimeMillis(),
-                        log_type = "wss_auth",
-                        profile_id = profileId,
-                        xmpp_token = xmppToken
-                    )
-                    GrindrPlus.database.logDao().insert(entity)
-                }
-            } catch (e: Exception) {
-                Logger.e("Failed to log WSS auth: ${e.message}")
             }
         }
     }
@@ -13261,7 +13212,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13359,54 +13309,6 @@ object SettingsUtils {
             }
         }
     }
-}
-
-@Preview
-@Composable
-fun ApiKeyTestDialogPreview() {
-    ApiKeyTestDialog(
-        isLoading = false,
-        title = "Success!",
-        message = "Your Google Maps API key is working correctly. You can use it with GrindrPlus.",
-        rawResponse = "{\n   \"results\" : [],\n   \"status\" : \"OK\"\n}",
-        onDismiss = {}
-    )
-}
-
-@Preview
-@Composable
-fun ApiKeyTestDialogLoadingPreview() {
-    ApiKeyTestDialog(
-        isLoading = true,
-        title = "Testing",
-        message = "Testing your API key...",
-        rawResponse = "",
-        onDismiss = {}
-    )
-}
-
-@Preview
-@Composable
-fun ApiKeyTestDialogErrorPreview() {
-    ApiKeyTestDialog(
-        isLoading = false,
-        title = "Invalid API Key",
-        message = "Your API key is invalid. Please double-check that you've copied it correctly.",
-        rawResponse = "{\n   \"error_message\" : \"API key is invalid. Please check the API key you are using.\",\n   \"results\" : [],\n   \"status\" : \"REQUEST_DENIED\"\n}",
-        onDismiss = {}
-    )
-}
-
-@Preview
-@Composable
-fun ApiKeyTestDialogWarningPreview() {
-    ApiKeyTestDialog(
-        isLoading = false,
-        title = "Warning",
-        message = "API returned SOME_OTHER_STATUS status",
-        rawResponse = "{\n   \"results\" : [],\n   \"status\" : \"SOME_OTHER_STATUS\"\n}",
-        onDismiss = {}
-    )
 }
 
 @Composable
@@ -14078,14 +13980,7 @@ fun rememberViewModel(): SettingsViewModel {
     val context = LocalContext.current
     val factory = remember(context) { SettingsViewModelFactory(context) }
     return viewModel(factory = factory)
-}
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun rememberViewModelPreview() {
-    rememberViewModel()
-}
- 
+} 
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\manager\settings\SettingTypes.kt --- 
 package com.grindrplus.manager.settings
 
@@ -16947,14 +16842,6 @@ fun SettingsScreen(
     }
 }
 
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun SettingsScreenPreview() {
-    SettingsScreen(
-        viewModel = com.grindrplus.manager.settings.rememberViewModel()
-    )
-}
-
 @Composable
 fun ResetSettingsDialog(
     onDismiss: () -> Unit,
@@ -17019,12 +16906,6 @@ fun ResetSettingsDialog(
             }
         }
     }
-}
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun ResetSettingsDialogPreview() {
-    ResetSettingsDialog(onDismiss = {}, onConfirm = {})
 }
 
 @Composable
@@ -17156,12 +17037,6 @@ fun AboutDialog(
     }
 }
 
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun AboutDialogPreview() {
-    AboutDialog(onDismiss = {}, onViewSourceCode = {})
-}
-
 @Composable
 fun SettingGroupSection(
     group: SettingGroup,
@@ -17200,25 +17075,6 @@ fun SettingGroupSection(
     }
 }
 
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun SettingGroupSectionPreview() {
-    val group = com.grindrplus.manager.settings.SettingGroup(
-        id = "preview_group",
-        title = "Preview Group",
-        settings = listOf(
-            com.grindrplus.manager.settings.SwitchSetting(
-                id = "switch_1",
-                title = "A switch setting",
-                description = "This is a description",
-                isChecked = true,
-                onCheckedChange = {}
-            )
-        )
-    )
-    SettingGroupSection(group = group, onSettingChanged = {})
-}
-
 @Composable
 fun ImprovedSettingItem(
     setting: Setting,
@@ -17233,23 +17089,6 @@ fun ImprovedSettingItem(
         else -> {}
     }
 }
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun ImprovedSettingItemPreview() {
-    val setting = com.grindrplus.manager.settings.SwitchSetting(
-        id = "switch_preview",
-        title = "Preview Switch",
-        description = "This is a preview switch setting.",
-        isChecked = true,
-        onCheckedChange = {}
-    )
-    ImprovedSettingItem(
-        setting = setting,
-        onSettingChanged = {}
-    )
-}
-
 @Composable
 fun ImprovedLocationListSetting(
     setting: com.grindrplus.manager.settings.LocationListSetting,
@@ -17384,25 +17223,6 @@ fun ImprovedLocationListSetting(
     }
 }
 
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun ImprovedLocationListSettingPreview() {
-    val setting = com.grindrplus.manager.settings.LocationListSetting(
-        id = "location_list_preview",
-        title = "Favorite Locations",
-        description = "Manage your favorite locations",
-        locations = listOf(
-            com.grindrplus.manager.settings.LocationData("Home", "34.0522", "-118.2437"),
-            com.grindrplus.manager.settings.LocationData("Work", "34.0532", "-118.2447")
-        ),
-        onLocationsChange = {}
-    )
-    ImprovedLocationListSetting(
-        setting = setting,
-        onChanged = {}
-    )
-}
-
 @Composable
 fun ImprovedSwitchSetting(
     setting: SwitchSetting,
@@ -17452,22 +17272,6 @@ fun ImprovedSwitchSetting(
             )
         )
     }
-}
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun ImprovedSwitchSettingPreview() {
-    val setting = com.grindrplus.manager.settings.SwitchSetting(
-        id = "switch_preview",
-        title = "Enable Feature",
-        description = "This will enable the new feature.",
-        isChecked = true,
-        onCheckedChange = {}
-    )
-    ImprovedSwitchSetting(
-        setting = setting,
-        onChanged = {}
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -17654,24 +17458,6 @@ fun ImprovedTextSetting(
             }
         }
     }
-}
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun ImprovedTextSettingPreview() {
-    val setting = com.grindrplus.manager.settings.TextSetting(
-        id = "text_preview",
-        title = "API Key",
-        description = "Enter your API key.",
-        value = "12345-abcde",
-        onValueChange = {},
-        keyboardType = com.grindrplus.manager.settings.KeyboardType.Text,
-        validator = null
-    )
-    ImprovedTextSetting(
-        setting = setting,
-        onChanged = {}
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -17884,25 +17670,6 @@ fun ImprovedTextSettingWithButtons(
     }
 }
 
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun ImprovedTextSettingWithButtonsPreview() {
-    val setting = com.grindrplus.manager.settings.TextSettingWithButtons(
-        id = "text_with_buttons_preview",
-        title = "Custom Endpoint",
-        description = "Enter a custom endpoint URL.",
-        value = "https://example.com/api",
-        onValueChange = {},
-        buttons = listOf(
-            com.grindrplus.manager.settings.ButtonAction("Test", {})
-        )
-    )
-    ImprovedTextSettingWithButtons(
-        setting = setting,
-        onChanged = {}
-    )
-}
-
 @Composable
 fun ImprovedButtonSetting(setting: ButtonSetting) {
     Row(
@@ -17931,21 +17698,7 @@ fun ImprovedButtonSetting(setting: ButtonSetting) {
             Text("Open")
         }
     }
-}
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun ImprovedButtonSettingPreview() {
-    val setting = com.grindrplus.manager.settings.ButtonSetting(
-        id = "button_preview",
-        title = "Open Documentation",
-        onClick = {}
-    )
-    ImprovedButtonSetting(
-        setting = setting
-    )
-}
- 
+} 
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\manager\ui\components\BlocksFilter.kt --- 
 package com.grindrplus.manager.ui.components
 
@@ -20899,7 +20652,7 @@ import com.grindrplus.persistence.model.ProfileViewEntity // <-- NEW IMPORT
         ProfileEntity::class,
         LogEntity::class
     ],
-    version = 7, // <-- INCREMENTED VERSION
+    version = 1, // <-- INCREMENTED VERSION
     exportSchema = false
 )
 
@@ -20916,25 +20669,6 @@ abstract class GPDatabase : RoomDatabase() {
     abstract fun profilePhotoDao(): ProfilePhotoDao
 
     abstract fun logDao(): LogDao
-
-    object DatabaseManager {
-        private var isReady = false
-        private val pendingLogs = mutableListOf<() -> Unit>()
-
-        fun markReady() {
-            isReady = true
-            pendingLogs.forEach { it() }
-            pendingLogs.clear()
-        }
-
-        fun executeWhenReady(block: () -> Unit) {
-            if (isReady) {
-                block()
-            } else {
-                pendingLogs += block
-            }
-        }
-    }
 
     companion object {
         private const val DATABASE_NAME = "grindrplus.db"
@@ -20959,9 +20693,7 @@ abstract class GPDatabase : RoomDatabase() {
                     .fallbackToDestructiveMigration(false)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
-
                 INSTANCE = instance
-                DatabaseManager.markReady()
                 instance
             }
         }
@@ -21209,7 +20941,8 @@ interface ProfileDao {
 
     @Query("SELECT * FROM profiles WHERE profileId = :profileId")
     suspend fun getProfileById(profileId: String): ProfileEntity?
-} 
+}
+ 
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\persistence\dao\ProfilePhotoDao.kt --- 
 package com.grindrplus.persistence.dao
 

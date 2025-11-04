@@ -4,9 +4,70 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import androidx.sqlite.db.SimpleSQLiteQuery
+
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.grindrplus.GrindrPlus
 
 object DatabaseHelper {
+    private fun getGrindrPlusDatabase(): SupportSQLiteDatabase {
+        return GrindrPlus.database.openHelper.writableDatabase
+    }
+
+    // NEW: Query GrindrPlus database
+    fun queryGrindrPlus(query: String, args: Array<String>? = null): List<Map<String, Any>> {
+        val database: SupportSQLiteDatabase = getGrindrPlusDatabase()
+        val sqlQuery: SupportSQLiteQuery = if (args != null) {
+            SimpleSQLiteQuery(query, args)
+        } else {
+            SimpleSQLiteQuery(query)
+        }
+
+        val cursor = database.query(sqlQuery) as Cursor
+        return cursor.use {
+            buildList {
+                if (cursor.moveToFirst()) {
+                    do {
+                        val row: Map<String, Any> = buildMap {
+                            for (i in 0 until cursor.columnCount) {
+                                val columnName = cursor.getColumnName(i)
+                                put(columnName, when (cursor.getType(i)) {
+                                    Cursor.FIELD_TYPE_INTEGER -> cursor.getInt(i)
+                                    Cursor.FIELD_TYPE_FLOAT -> cursor.getFloat(i)
+                                    Cursor.FIELD_TYPE_STRING -> cursor.getString(i)
+                                    Cursor.FIELD_TYPE_BLOB -> cursor.getBlob(i)
+                                    Cursor.FIELD_TYPE_NULL -> "NULL"
+                                    else -> "UNKNOWN"
+                                })
+                            }
+                        }
+                        add(row)
+                    } while (cursor.moveToNext())
+                }
+            }
+        }
+    }
+
+
+    // NEW: Execute on GrindrPlus database
+    fun executeGrindrPlus(sql: String, args: Array<Any?>? = null) {
+        val database = getGrindrPlusDatabase()
+        if (args != null) {
+            database.execSQL(sql, args)
+        } else {
+            database.execSQL(sql)
+        }
+    }
+
+    // NEW: Helper for single integer queries
+    fun querySingleInt(query: String): Int =
+        getDatabase().use { database ->
+            database.rawQuery(query, null).use { cursor ->
+                if (cursor.moveToFirst()) cursor.getInt(0) else 0
+            }
+        }
+
     private fun getDatabase(): SQLiteDatabase {
         val context = GrindrPlus.context
         val databases = context.databaseList()
@@ -23,35 +84,32 @@ object DatabaseHelper {
             Logger.d("Using database: $it") }, Context.MODE_PRIVATE, null)
     }
 
-    fun query(query: String, args: Array<String>? = null): List<Map<String, Any>> {
-        val database = getDatabase()
-        val cursor = database.rawQuery(query, args)
-        val results = mutableListOf<Map<String, Any>>()
-
-        try {
-            if (cursor.moveToFirst()) {
-                do {
-                    val row = mutableMapOf<String, Any>()
-                    cursor.columnNames.forEach { column ->
-                        row[column] = when (cursor.getType(cursor.getColumnIndexOrThrow(column))) {
-                            Cursor.FIELD_TYPE_INTEGER -> cursor.getInt(cursor.getColumnIndexOrThrow(column))
-                            Cursor.FIELD_TYPE_FLOAT -> cursor.getFloat(cursor.getColumnIndexOrThrow(column))
-                            Cursor.FIELD_TYPE_STRING -> cursor.getString(cursor.getColumnIndexOrThrow(column))
-                            Cursor.FIELD_TYPE_BLOB -> cursor.getBlob(cursor.getColumnIndexOrThrow(column))
-                            Cursor.FIELD_TYPE_NULL -> "NULL"
-                            else -> "UNKNOWN"
-                        }
+    fun query(query: String, args: Array<String>? = null): List<Map<String, Any>> =
+        getDatabase().use { database ->
+            database.rawQuery(query, args).use { cursor ->
+                buildList {
+                    if (cursor.moveToFirst()) {
+                        do {
+                            val row = buildMap<String, Any> {
+                                cursor.columnNames.forEach { column ->
+                                    val idx = cursor.getColumnIndexOrThrow(column)
+                                    put(column, when (cursor.getType(idx)) {
+                                        Cursor.FIELD_TYPE_INTEGER -> cursor.getInt(idx)
+                                        Cursor.FIELD_TYPE_FLOAT   -> cursor.getFloat(idx)
+                                        Cursor.FIELD_TYPE_STRING  -> cursor.getString(idx)
+                                        Cursor.FIELD_TYPE_BLOB    -> cursor.getBlob(idx)
+                                        Cursor.FIELD_TYPE_NULL    -> "NULL"
+                                        else                      -> "UNKNOWN"
+                                    })
+                                }
+                            }
+                            add(row)
+                        } while (cursor.moveToNext())
                     }
-                    results.add(row)
-                } while (cursor.moveToNext())
+                }
             }
-        } finally {
-            cursor.close()
-            database.close()
         }
 
-        return results
-    }
 
     fun insert(table: String, values: ContentValues): Long {
         val database = getDatabase()

@@ -538,3 +538,9 @@ fun rememberViewModel(): SettingsViewModel {
     val factory = remember(context) { SettingsViewModelFactory(context) }
     return viewModel(factory = factory)
 }
+
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun rememberViewModelPreview() {
+    rememberViewModel()
+}

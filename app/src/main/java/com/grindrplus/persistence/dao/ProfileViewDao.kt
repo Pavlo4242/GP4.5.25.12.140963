@@ -28,11 +28,9 @@ interface ProfileViewDao {
     @Query("SELECT COUNT(*) FROM profile_views")
     suspend fun getCount(): Int
 
-    // Add this missing method that ProfileViewsTracker is trying to use
     @Query("SELECT * FROM profile_views WHERE profileId LIKE 'unresolved_%'")
     suspend fun getUnresolvedViews(): List<ProfileViewEntity>
 
-    // Add this missing delete method
-    @Delete
+    @androidx.room.Delete
     suspend fun delete(view: ProfileViewEntity)
 }
