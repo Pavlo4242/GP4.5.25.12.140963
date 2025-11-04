@@ -80,22 +80,27 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
                 true
             }
         }
+        // REVISED HOOK: Attach listeners in the data binding method for reliability.
+        // This method is called whenever the profile bar is updated with new data.
+        findClass(profileBarView).hook("a", HookStage.AFTER) { param ->
+            val profileBarViewInstance = param.thisObject()
+            val profileViewState = param.arg<Any>(0) // The ProfileViewState object passed to the method
 
-        // FIXED: Single hook for ProfileBarView with both click and long-click
-        // This must run AFTER the view is constructed to override any default handlers
-        findClass(profileBarView).hookConstructor(HookStage.AFTER) { param ->
             try {
-                val viewBinding = getObjectField(param.thisObject(), "c")
+                val viewBinding = getObjectField(profileBarViewInstance, "c")
                 val displayNameTextView = getObjectField(viewBinding, "c") as TextView
+                val profile = getObjectField(profileViewState, "profile") ?: return@hook
+                val profileId = callMethod(profile, "getProfileId") as String
 
-                Logger.d("Setting up ProfileBarView click handlers", source = LogSource.HOOK)
+                // ADDED: Click listener to copy profile ID
+                displayNameTextView.setOnClickListener {
+                    copyToClipboard("Profile ID", profileId)
+                    GrindrPlus.showToast(Toast.LENGTH_SHORT, "Copied Profile ID: $profileId")
+                }
 
-                // Simple approach - just use long click for our functionality
-                // This avoids conflicts with Grindr's original click behavior
+                // REVISED: Long-click listener to show hidden details
                 displayNameTextView.setOnLongClickListener { v ->
                     try {
-                        val profile = getObjectField(param.thisObject(), "d") ?: return@setOnLongClickListener false
-                        val profileId = callMethod(profile, "getProfileId") as String
                         val accountCreationTime =
                             formatEpochSeconds(GrindrPlus.spline.invert(profileId.toDouble()).toLong())
 
@@ -141,21 +146,18 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
                                     getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.WHITE)
                                 }
                             }
-
                         true // Consume the long click
                     } catch (e: Exception) {
                         Logger.e("Error showing profile details: ${e.message}", source = LogSource.HOOK)
                         false
                     }
                 }
-
-                Logger.d("ProfileBarView long-click handler set successfully", source = LogSource.HOOK)
-
             } catch (e: Exception) {
                 Logger.e("Error setting ProfileBarView handlers: ${e.message}", source = LogSource.HOOK)
                 Logger.writeRaw(e.stackTraceToString())
             }
         }
+
 
         // Hook for distance display precision
         findClass(distanceUtils).hook("c", HookStage.AFTER) { param ->
