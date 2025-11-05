@@ -32,7 +32,6 @@ object CredentialsLogger {
 
         val cleanAuthToken = authToken.substringAfter("Grindr3 ")
         if (cleanAuthToken == lastAuthToken) return
-        GPDatabase.DatabaseManager.executeWhenReady {
             try {
                 val profileId = getProfileIdFromToken(cleanAuthToken)
 
@@ -59,11 +58,10 @@ object CredentialsLogger {
                         device_info = lDeviceInfo,
                         user_agent = userAgent
                     )
-                    GrindrPlus.database.logDao().insert(entity)
+
                 }
             } catch (e: Exception) {
                 Logger.e("Failed to write credentials: ${e.message}")
             }
         }
     }
-}

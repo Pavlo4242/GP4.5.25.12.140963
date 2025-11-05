@@ -109,49 +109,20 @@ class UnlimitedProfiles : Hook(
         // FIXED: Only hook swipe gestures, not all profile interactions
         // This was breaking ProfileDetails.kt click handlers
         findClass(onProfileClicked).hook("invokeSuspend", HookStage.BEFORE) { param ->
-            // Only disable swipe if the config is enabled
-            if (!(Config.get("disable_profile_swipe", false) as Boolean)) {
-                return@hook
-            }
-
-            // Try to get the cached profile from the coroutine context
-            val cachedProfile = getObjectField(param.thisObject(), param.thisObject().javaClass.declaredFields
-                .firstOrNull { it.type.name.contains("ServerDrivenCascadeCachedProfile") }?.name
-            )
-
-            if (cachedProfile != null) {
-                runCatching {
-                    val profileId = getObjectField(cachedProfile, "profileIdLong").toString()
-
-                    // CRITICAL: Check if this is a swipe gesture vs a normal click
-                    // Swipe gestures typically come from cascade view, not profile view
-                    // We should only intercept cascade swipes, not ProfileBarView clicks
-
-                    // Get the calling context to determine if this is from cascade or profile view
-                    val stackTrace = Thread.currentThread().stackTrace
-                    val isFromCascade = stackTrace.any {
-                        it.className.contains("Cascade") ||
-                                it.className.contains("browse")
-                    }
-                    val isFromProfileView = stackTrace.any {
-                        it.className.contains("ProfileBarView") ||
-                                it.className.contains("ProfilesActivity")
-                    }
-
-                    // Only intercept cascade swipes, allow profile view clicks
-                    if (isFromCascade && !isFromProfileView) {
-                        openProfile(profileId)
-                        param.setResult(null)
-                        Logger.d("Intercepted cascade swipe for profile: $profileId")
-                    } else {
-                        Logger.d("Allowing profile view click for: $profileId")
-                        // Don't set result - let normal handling continue
-                    }
-                }.onFailure {
-                    loge("Error in profile click handler: ${it.message}")
+            if (Config.get("disable_profile_swipe", false) as Boolean) {
+                getObjectField(param.thisObject(), param.thisObject().javaClass.declaredFields
+                    .firstOrNull { it.type.name.contains("ServerDrivenCascadeCachedProfile") }?.name
+                )?.let { cachedProfile ->
+                    runCatching { getObjectField(cachedProfile, "profileIdLong").toString() }
+                        .onSuccess { profileId ->
+                            openProfile(profileId)
+                            param.setResult(null)
+                        }
+                        .onFailure { loge("Profile ID not found in cached profile") }
                 }
             }
         }
+
 
         // Apply custom filters if enabled
         findClass(serverDrivenCascadeCachedState)

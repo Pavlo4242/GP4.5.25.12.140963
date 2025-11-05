@@ -1,5 +1,7 @@
 package com.grindrplus.hooks
 
+import android.content.ContentValues
+import android.os.Environment
 import com.grindrplus.GrindrPlus
 import com.grindrplus.core.Logger
 import com.grindrplus.core.logd
@@ -17,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.provider.MediaStore
 
 class ExpiringMedia : Hook(
     "Expiring media",
@@ -137,6 +140,44 @@ class ExpiringMedia : Hook(
 
                 withContext(Dispatchers.Main) {
                     param.setResult(filePath)
+                }
+
+                // Automatically save a copy to user-accessible public storage (Pictures or Movies)
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val resolver = GrindrPlus.context.contentResolver
+                            val collection = if (mediaType == MediaType.IMAGE) {
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                            } else {
+                                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                            }
+                            val dir = if (mediaType == MediaType.IMAGE) {
+                                Environment.DIRECTORY_PICTURES
+                            } else {
+                                Environment.DIRECTORY_MOVIES
+                            }
+                            val fileName = "grindr_${mediaTypeStr}_${mediaId}.${fileExtension}"
+                            val values = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                put(MediaStore.MediaColumns.MIME_TYPE, if (mediaType == MediaType.IMAGE) "image/jpeg" else "video/mp4")
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "$dir/Grindr")
+                            }
+                            val uri = resolver.insert(collection, values)
+                            if (uri != null) {
+                                resolver.openOutputStream(uri).use { os ->
+                                    os?.write(mediaData)
+                                    os?.flush()
+                                }
+                                logi("Saved $mediaTypeStr to public storage: $fileName")
+                            } else {
+                                loge("Failed to insert to MediaStore for public save")
+                            }
+                        } catch (e: Exception) {
+                            loge("Failed to save to public storage: ${e.message}")
+                            // Fallback: No additional action needed, as local private save already succeeded
+                        }
+                    }
                 }
             },
             onFailure = { error ->

@@ -20,7 +20,6 @@ import com.grindrplus.persistence.model.AlbumEntity
 import com.grindrplus.utils.Hook
 import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.RetrofitUtils
-import com.grindrplus.utils.RetrofitUtils.SUCCESS_VALUE_NAME
 import com.grindrplus.utils.RetrofitUtils.createSuccess
 import com.grindrplus.utils.RetrofitUtils.getSuccessValue
 import com.grindrplus.utils.RetrofitUtils.isFail
@@ -30,7 +29,6 @@ import com.grindrplus.utils.RetrofitUtils.isSuccess
 import com.grindrplus.utils.hook
 import com.grindrplus.utils.hookConstructor
 import com.grindrplus.utils.withSuspendResult
-import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers.getObjectField
 import de.robv.android.xposed.XposedHelpers.setObjectField
 import java.io.Closeable
@@ -488,75 +486,84 @@ class UnlimitedAlbums : Hook("Unlimited albums", "Allow to be able to view unlim
             }
         }
 
+    // REVISED AND CORRECTED LOGIC
     @Suppress("UNCHECKED_CAST")
     private fun handleGetAlbumsSharesProfileId(args: Array<Any?>, result: Any) =
         withSuspendResult(args, result) { args, result ->
-            logd("Fetching shared albums for profile ID")
             val profileId = args[0] as? Long ?: return@withSuspendResult result
+            logd("Fetching shared albums for profile ID: $profileId")
 
+            // Step 1: If the network call was successful, update the local database.
             if (result.isSuccess()) {
                 try {
-                    runBlocking {
-                        GrindrPlus.database.withTransaction {
-                            val dao = GrindrPlus.database.albumDao()
-                            val albumBriefs =
-                                getObjectField(result.getSuccessValue(), "albums") as? List<Any>
-                            albumBriefs?.forEach { albumBrief ->
-                                try {
-                                    val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
-                                    dao.upsertAlbum(albumEntity)
-
-                                    val grindrAlbumContent = getObjectField(albumBrief, "content")
-                                    if (grindrAlbumContent != null) {
-                                        val dbAlbumContent =
-                                            grindrAlbumContent.toAlbumContentEntity(albumEntity.id)
-                                        dao.upsertAlbumContent(dbAlbumContent)
+                    val albumBriefs = getObjectField(result.getSuccessValue(), "albums") as? List<Any>
+                    if (!albumBriefs.isNullOrEmpty()) {
+                        logd("Received ${albumBriefs.size} album(s) from network for profile $profileId. Updating local cache.")
+                        runBlocking {
+                            GrindrPlus.database.withTransaction {
+                                val dao = GrindrPlus.database.albumDao()
+                                albumBriefs.forEach { albumBrief ->
+                                    try {
+                                        val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
+                                        // Only upsert if it's for the correct profile
+                                        if (albumEntity.profileId == profileId) {
+                                            dao.upsertAlbum(albumEntity)
+                                            val grindrAlbumContent = getObjectField(albumBrief, "content")
+                                            if (grindrAlbumContent != null) {
+                                                val dbAlbumContent = grindrAlbumContent.toAlbumContentEntity(albumEntity.id)
+                                                dao.upsertAlbumContent(dbAlbumContent)
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        loge("Error processing album brief during update: ${e.message}")
                                     }
-                                } catch (e: Exception) {
-                                    loge("Error processing album brief: ${e.message}")
-                                    Logger.writeRaw(e.stackTraceToString())
                                 }
                             }
                         }
+                    } else {
+                        logd("Network returned empty album list for profile $profileId. Local cache will be preserved.")
                     }
                 } catch (e: Exception) {
-                    loge("Error saving album briefs: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
+                    loge("Error saving album briefs from network: ${e.message}")
                 }
+            } else {
+                logw("Network call failed for profile $profileId albums. Will rely solely on local cache.")
             }
 
+            // Step 2: Always query the local database and return its contents.
             try {
-                val albumBriefs = runBlocking {
+                val albumBriefsFromDb = runBlocking {
                     GrindrPlus.database.withTransaction {
                         val dao = GrindrPlus.database.albumDao()
-                        val dbAlbums = dao.getAlbums(profileId)
+                        val dbAlbums = dao.getAlbums(profileId) // Fetch specifically for this profile
+                        logd("Found ${dbAlbums.size} album(s) in local cache for profile $profileId.")
                         dbAlbums.mapNotNull {
                             try {
                                 val dbContent = dao.getAlbumContent(it.id)
                                 if (dbContent.isNotEmpty()) {
                                     it.toGrindrAlbumBrief(dbContent.first())
                                 } else {
-                                    logw("Album ${it.id} has no content")
+                                    logw("Album ${it.id} from cache has no content, skipping.")
                                     null
                                 }
                             } catch (e: Exception) {
-                                loge("Error converting album ${it.id} to brief: ${e.message}")
-                                Logger.writeRaw(e.stackTraceToString())
+                                loge("Error converting cached album ${it.id} to brief: ${e.message}")
                                 null
                             }
                         }
                     }
                 }
 
-                val newValue =
-                    findClass(sharedAlbumsBrief)
-                        .getConstructor(List::class.java)
-                        .newInstance(albumBriefs)
+                // Create the success response object with the data from our database.
+                val newValue = findClass(sharedAlbumsBrief)
+                    .getConstructor(List::class.java)
+                    .newInstance(albumBriefsFromDb)
 
-                createSuccess(newValue)
+                return@withSuspendResult createSuccess(newValue)
+
             } catch (e: Exception) {
-                loge("Error creating shared albums brief: ${e.message}")
-                result
+                loge("FATAL: Error creating final shared albums brief from database: ${e.message}")
+                return@withSuspendResult result // Fallback to original result on critical error
             }
         }
 

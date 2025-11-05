@@ -50,6 +50,7 @@ class LocationSpoofer : Hook(
 ) {
     private val location = "android.location.Location"
     private val chatBottomToolbar = "com.grindrapp.android.chat.presentation.ui.view.ChatBottomToolbar"
+
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
 
     override fun init() {

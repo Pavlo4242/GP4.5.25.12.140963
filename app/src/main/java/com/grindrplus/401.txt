@@ -165,6 +165,7 @@ object GrindrPlus {
         this.classLoader =
             DexClassLoader(newModule.absolutePath, null, null, context.classLoader)
         this.database = GPDatabase.create(context)
+        GPDatabase.DatabaseManager.markReady()
         this.hookManager = HookManager()
         this.instanceManager = InstanceManager(classLoader)
         this.packageName = context.packageName
@@ -4653,7 +4654,6 @@ object CredentialsLogger {
 
         val cleanAuthToken = authToken.substringAfter("Grindr3 ")
         if (cleanAuthToken == lastAuthToken) return
-        GPDatabase.DatabaseManager.executeWhenReady {
             try {
                 val profileId = getProfileIdFromToken(cleanAuthToken)
 
@@ -4680,14 +4680,14 @@ object CredentialsLogger {
                         device_info = lDeviceInfo,
                         user_agent = userAgent
                     )
-                    GrindrPlus.database.logDao().insert(entity)
+
                 }
             } catch (e: Exception) {
                 Logger.e("Failed to write credentials: ${e.message}")
             }
         }
     }
-} 
+ 
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\core\DatabaseHelper.kt --- 
 package com.grindrplus.core
 
@@ -7579,6 +7579,8 @@ class EnableUnlimited : Hook(
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\hooks\ExpiringMedia.kt --- 
 package com.grindrplus.hooks
 
+import android.content.ContentValues
+import android.os.Environment
 import com.grindrplus.GrindrPlus
 import com.grindrplus.core.Logger
 import com.grindrplus.core.logd
@@ -7596,6 +7598,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.provider.MediaStore
 
 class ExpiringMedia : Hook(
     "Expiring media",
@@ -7716,6 +7719,44 @@ class ExpiringMedia : Hook(
 
                 withContext(Dispatchers.Main) {
                     param.setResult(filePath)
+                }
+
+                // Automatically save a copy to user-accessible public storage (Pictures or Movies)
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val resolver = GrindrPlus.context.contentResolver
+                            val collection = if (mediaType == MediaType.IMAGE) {
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                            } else {
+                                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                            }
+                            val dir = if (mediaType == MediaType.IMAGE) {
+                                Environment.DIRECTORY_PICTURES
+                            } else {
+                                Environment.DIRECTORY_MOVIES
+                            }
+                            val fileName = "grindr_${mediaTypeStr}_${mediaId}.${fileExtension}"
+                            val values = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                put(MediaStore.MediaColumns.MIME_TYPE, if (mediaType == MediaType.IMAGE) "image/jpeg" else "video/mp4")
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, "$dir/Grindr")
+                            }
+                            val uri = resolver.insert(collection, values)
+                            if (uri != null) {
+                                resolver.openOutputStream(uri).use { os ->
+                                    os?.write(mediaData)
+                                    os?.flush()
+                                }
+                                logi("Saved $mediaTypeStr to public storage: $fileName")
+                            } else {
+                                loge("Failed to insert to MediaStore for public save")
+                            }
+                        } catch (e: Exception) {
+                            loge("Failed to save to public storage: ${e.message}")
+                            // Fallback: No additional action needed, as local private save already succeeded
+                        }
+                    }
                 }
             },
             onFailure = { error ->
@@ -8204,6 +8245,7 @@ class LocationSpoofer : Hook(
 ) {
     private val location = "android.location.Location"
     private val chatBottomToolbar = "com.grindrapp.android.chat.presentation.ui.view.ChatBottomToolbar"
+
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
 
     override fun init() {
@@ -9173,17 +9215,31 @@ package com.grindrplus.hooks
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.Context
+import android.graphics.BlendMode
+import android.graphics.BlendModeColorFilter
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import android.os.Build
 import android.view.View
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.graphics.toColorInt
+import androidx.core.view.children
 import com.grindrplus.GrindrPlus
 import com.grindrplus.core.Config
+import com.grindrplus.core.Constants
 import com.grindrplus.core.Logger
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.Utils
 import com.grindrplus.core.Utils.calculateBMI
 import com.grindrplus.core.Utils.h2n
 import com.grindrplus.core.Utils.w2n
+import com.grindrplus.core.logd
+import com.grindrplus.core.loge
 import com.grindrplus.core.logw
 import com.grindrplus.ui.Utils.copyToClipboard
 import com.grindrplus.ui.Utils.formatEpochSeconds
@@ -9194,20 +9250,31 @@ import com.grindrplus.utils.hookConstructor
 import de.robv.android.xposed.XposedHelpers.callMethod
 import de.robv.android.xposed.XposedHelpers.getObjectField
 import de.robv.android.xposed.XposedHelpers.setObjectField
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.ArrayList
 import kotlin.math.roundToInt
 
 class ProfileDetails : Hook("Profile details", "Add extra fields and details to profiles") {
+    private val profileId = emptyList<String>()
     private var boostedProfilesList = emptyList<String>()
     private val blockedProfilesObserver = "cf.p"
     private val profileViewHolder = "cf.F\$b"
     private val distanceUtils = "com.grindrapp.android.utils.DistanceUtils"
     private val profileBarView = "com.grindrapp.android.ui.profileV2.ProfileBarView"
     private val profileViewState = "com.grindrapp.android.ui.profileV2.model.ProfileViewState"
+
     private val serverDrivenCascadeCachedState =
         "com.grindrapp.android.persistence.model.serverdrivencascade.ServerDrivenCascadeCacheState"
     private val serverDrivenCascadeCachedProfile =
         "com.grindrapp.android.persistence.model.serverdrivencascade.ServerDrivenCascadeCachedProfile"
+
+    private val profileQuickBarView = "com.grindrapp.android.ui.profileV2.ProfileQuickbarView"
+
+    private val profileQuickBar = "com.grindrapp.android.ui.profileV2.ProfileQuickbarView"
+
+    private val coroutineScope = CoroutineScope(Dispatchers.Main)
 
     @SuppressLint("DefaultLocale")
     override fun init() {
@@ -9225,7 +9292,8 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
         // Hook for blocked profiles list - show profile ID
         findClass(blockedProfilesObserver).hook("onChanged", HookStage.AFTER) { param ->
             val profileList = getObjectField(
-                getObjectField(param.thisObject(), "a"), "o") as ArrayList<*>
+                getObjectField(param.thisObject(), "a"), "o"
+            ) as ArrayList<*>
             for (profile in profileList) {
                 val profileId = callMethod(profile, "getProfileId") as String
                 val displayName =
@@ -9251,140 +9319,371 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
                 true
             }
         }
-
-        // FIXED: Single hook for ProfileBarView with both click and long-click
-        // This must run AFTER the view is constructed to override any default handlers
-        findClass(profileBarView).hookConstructor(HookStage.AFTER) { param ->
-            try {
-                val viewBinding = getObjectField(param.thisObject(), "c")
-                val displayNameTextView = getObjectField(viewBinding, "c") as TextView
-
-                Logger.d("Setting up ProfileBarView click handlers", source = LogSource.HOOK)
-
-                // Simple approach - just use long click for our functionality
-                // This avoids conflicts with Grindr's original click behavior
-                displayNameTextView.setOnLongClickListener { v ->
+        // REVISED HOOK: Attach listeners in the data binding method for reliability.
+        // This method is called whenever the profile bar is updated with new data.
+        findClass(profileQuickBarView).hookConstructor(stage = HookStage.AFTER) { param ->
+            val profileQuickBarViewInstance = param.thisObject()
+            val profileQuickBarViewLinearLayout = param.thisObject() as LinearLayout
+            val profileId = param.thisObject().javaClass.declaredFields
+                .asSequence()
+                .filter { it.type == String::class.java }
+                .mapNotNull { field ->
                     try {
-                        val profile = getObjectField(param.thisObject(), "d") ?: return@setOnLongClickListener false
-                        val profileId = callMethod(profile, "getProfileId") as String
-                        val accountCreationTime =
-                            formatEpochSeconds(GrindrPlus.spline.invert(profileId.toDouble()).toLong())
+                        field.isAccessible = true
+                        field.get(param.thisObject()) as? String
+                    } catch (e: Exception) { null }
+                }
+                .firstOrNull { it.isNotEmpty() && it.all { char -> char.isDigit() } }
+            // Post the logic to run after the view has been initialized and laid out
+            profileQuickBarViewLinearLayout.post {
+                logd("ProfileDetails: post() block executed for ProfileQuickbarView.")
 
-                        val properties = mapOf(
-                            "Estimated creation" to accountCreationTime,
-                            "Profile ID" to profileId,
-                            "Approximate distance" to Utils.safeGetField(profile, "approximateDistance") as? Boolean,
-                            "Favorite" to Utils.safeGetField(profile, "isFavorite") as? Boolean,
-                            "From viewed me" to Utils.safeGetField(profile, "isFromViewedMe") as? Boolean,
-                            "JWT boosting" to Utils.safeGetField(profile, "isJwtBoosting") as? Boolean,
-                            "New" to Utils.safeGetField(profile, "isNew") as? Boolean,
-                            "Teleporting" to Utils.safeGetField(profile, "isTeleporting") as? Boolean,
-                            "Online now" to Utils.safeGetField(profile, "onlineNow") as? Boolean,
-                            "Is roaming" to Utils.safeGetField(profile, "isRoaming") as? Boolean,
-                            "Found via roam" to Utils.safeGetField(profile, "foundViaRoam") as? Boolean,
-                            "Is top pick" to Utils.safeGetField(profile, "isTopPick") as? Boolean,
-                            "Is visiting" to Utils.safeGetField(profile, "isVisiting") as? Boolean
-                        ).filterValues { it != null }
+                if (profileQuickBarViewLinearLayout.children.any { it.tag == "profile_deets" }) {
+                    logd("Button already exists. Skipping.")
+                    return@post
+                }
 
-                        val detailsText = if (properties.isNotEmpty()) {
-                            properties.map { (key, value) -> "• $key: $value" }.joinToString("\n")
-                        } else {
-                            "No hidden details available for this profile"
-                        }
+                val exampleButton = profileQuickBarViewLinearLayout.children.firstOrNull()
+                if (exampleButton == null) {
+                    loge("FAILURE: ProfileQuickbarView has no child buttons to use as a template.")
+                    return@post
+                }
 
-                        AlertDialog.Builder(v.context)
-                            .setTitle("Hidden profile details - $profileId")
-                            .setMessage(detailsText)
-                            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
-                            .setNeutralButton("Copy Details") { _, _ ->
-                                copyToClipboard("Profile Details", detailsText)
-                                GrindrPlus.showToast(Toast.LENGTH_SHORT, "Profile details copied")
+                val grindrContext: Context
+                try {
+                    grindrContext =
+                        GrindrPlus.context.createPackageContext(Constants.GRINDR_PACKAGE_NAME, 0)
+                } catch (e: Exception) {
+                    loge("FAILURE: Could not create package context. Button cannot be added. Error: ${e.message}")
+                    return@post
+                }
+
+                val rippleDrawableId =
+                    com.grindrplus.ui.Utils.getId("image_button_ripple", "drawable", grindrContext)
+                val infoIconId = com.grindrplus.ui.Utils.getId(
+                    "ic_info",
+                    "drawable",
+                    grindrContext
+                ) // Assuming ic_info exists; replace with actual ID if needed via decompilation
+
+                if (rippleDrawableId == 0 || infoIconId == 0) {
+                    loge("FAILURE: Required resources for details button not found.")
+                    return@post
+                }
+
+                val customDeetsButton = ImageButton(profileQuickBarViewLinearLayout.context).apply {
+                    layoutParams =
+                        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT)
+                            .apply { weight = 1f }
+                    focusable = ImageButton.FOCUSABLE
+                    scaleType = ImageView.ScaleType.CENTER
+                    isClickable = true
+                    tag = "profile_deets"
+                    contentDescription = "profile details"
+                    setBackgroundResource(rippleDrawableId)
+                    setImageResource(infoIconId)
+                    setPadding(
+                        exampleButton.paddingLeft,
+                        exampleButton.paddingTop,
+                        exampleButton.paddingRight,
+                        exampleButton.paddingBottom
+                    )
+                    val grindrGray = "#9e9ea8".toColorInt()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        drawable.colorFilter = BlendModeColorFilter(grindrGray, BlendMode.SRC_IN)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        drawable.colorFilter =
+                            PorterDuffColorFilter(grindrGray, PorterDuff.Mode.SRC_IN)
+                    }
+                }
+
+                customDeetsButton.setOnClickListener {
+                    coroutineScope.launch {
+                        try {
+                            val profile = getObjectField(
+                                param.thisObject(),
+                                "profileViewState"
+                            )?.let { getObjectField(it, "profile") } ?: run {
+                                Toast.makeText(
+                                    it.context,
+                                    "No profile data available",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                return@launch
                             }
-                            .setNegativeButton("Copy ID") { _, _ ->
-                                copyToClipboard("Profile ID", profileId)
-                                GrindrPlus.showToast(Toast.LENGTH_SHORT, "Profile ID copied")
+                            val profileId = callMethod(profile, "getProfileId") as String
+                            val accountCreationTime = formatEpochSeconds(
+                                GrindrPlus.spline.invert(profileId.toDouble()).toLong()
+                            )
+
+                            val properties = mapOf(
+                                "Estimated creation" to accountCreationTime,
+                                "Profile ID" to profileId,
+                                "Approximate distance" to Utils.safeGetField(
+                                    profile,
+                                    "approximateDistance"
+                                ) as? Boolean,
+                                "Favorite" to Utils.safeGetField(profile, "isFavorite") as? Boolean,
+                                "From viewed me" to Utils.safeGetField(
+                                    profile,
+                                    "isFromViewedMe"
+                                ) as? Boolean,
+                                "JWT boosting" to Utils.safeGetField(
+                                    profile,
+                                    "isJwtBoosting"
+                                ) as? Boolean,
+                                "New" to Utils.safeGetField(profile, "isNew") as? Boolean,
+                                "Teleporting" to Utils.safeGetField(
+                                    profile,
+                                    "isTeleporting"
+                                ) as? Boolean,
+                                "Online now" to Utils.safeGetField(
+                                    profile,
+                                    "onlineNow"
+                                ) as? Boolean,
+                                "Is roaming" to Utils.safeGetField(
+                                    profile,
+                                    "isRoaming"
+                                ) as? Boolean,
+                                "Found via roam" to Utils.safeGetField(
+                                    profile,
+                                    "foundViaRoam"
+                                ) as? Boolean,
+                                "Is top pick" to Utils.safeGetField(
+                                    profile,
+                                    "isTopPick"
+                                ) as? Boolean,
+                                "Is visiting" to Utils.safeGetField(
+                                    profile,
+                                    "isVisiting"
+                                ) as? Boolean
+                            ).filterValues { it != null }
+
+                            val detailsText = if (properties.isNotEmpty()) {
+                                properties.map { (key, value) -> "• $key: $value" }
+                                    .joinToString("\n")
+                            } else {
+                                "No hidden details available for this profile"
                             }
-                            .show()
-                            .apply {
-                                setOnShowListener {
-                                    getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(android.graphics.Color.WHITE)
-                                    getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(android.graphics.Color.WHITE)
-                                    getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.WHITE)
+
+                            AlertDialog.Builder(it.context)
+                                .setTitle("Hidden profile details - $profileId")
+                                .setMessage(detailsText)
+                                .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+                                .setNeutralButton("Copy Details") { _, _ ->
+                                    copyToClipboard("Profile Details", detailsText)
+                                    GrindrPlus.showToast(
+                                        Toast.LENGTH_SHORT,
+                                        "Profile details copied"
+                                    )
                                 }
-                            }
-
-                        true // Consume the long click
-                    } catch (e: Exception) {
-                        Logger.e("Error showing profile details: ${e.message}", source = LogSource.HOOK)
-                        false
-                    }
-                }
-
-                Logger.d("ProfileBarView long-click handler set successfully", source = LogSource.HOOK)
-
-            } catch (e: Exception) {
-                Logger.e("Error setting ProfileBarView handlers: ${e.message}", source = LogSource.HOOK)
-                Logger.writeRaw(e.stackTraceToString())
-            }
-        }
-
-        // Hook for distance display precision
-        findClass(distanceUtils).hook("c", HookStage.AFTER) { param ->
-            val distance = param.arg<Double>(0)
-            val isFeet = param.arg<Boolean>(2)
-
-            param.setResult(
-                if (isFeet) {
-                    val feet = (distance * 3.280839895).roundToInt()
-                    if (feet < 5280) {
-                        String.format("%d feet", feet)
-                    } else {
-                        String.format("%d miles %d feet", feet / 5280, feet % 5280)
-                    }
-                } else {
-                    val meters = distance.roundToInt()
-                    if (meters < 1000) {
-                        String.format("%d meters", meters)
-                    } else {
-                        String.format("%d km %d m", meters / 1000, meters % 1000)
-                    }
-                }
-            )
-        }
-
-        // Hook for BMI display in profile
-        findClass(profileViewState).hook("getWeight", HookStage.AFTER) { param ->
-            if (Config.get("show_bmi_in_profile", true) as Boolean) {
-                val weight = param.getResult()
-                val height = callMethod(param.thisObject(), "getHeight")
-
-                if (weight != null && height != null) {
-                    val BMI = calculateBMI(
-                        "kg" in weight.toString(),
-                        w2n("kg" in weight.toString(), weight.toString()),
-                        h2n("kg" in weight.toString(), height.toString())
-                    )
-                    if (Config.get("do_gui_safety_checks", true) as Boolean) {
-                        if (weight.toString().contains("(")) {
-                            logw("BMI details are already present")
-                            return@hook
+                                .setNegativeButton("Copy ID") { _, _ ->
+                                    copyToClipboard("Profile ID", profileId)
+                                    GrindrPlus.showToast(Toast.LENGTH_SHORT, "Profile ID copied")
+                                }
+                                .show()
+                                .apply {
+                                    setOnShowListener {
+                                        getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(android.graphics.Color.WHITE)
+                                        getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(android.graphics.Color.WHITE)
+                                        getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.WHITE)
+                                    }
+                                }
+                        } catch (e: Exception) {
+                            loge("Error showing profile details: ${e.message}")
+                            Toast.makeText(it.context, "Failed to load details", Toast.LENGTH_SHORT)
+                                .show()
                         }
                     }
-                    param.setResult(
-                        "$weight - ${String.format("%.1f", BMI)} (${
-                            mapOf(
-                                "Underweight" to 18.5,
-                                "Normal weight" to 24.9,
-                                "Overweight" to 29.9,
-                                "Obese" to Double.MAX_VALUE
-                            ).entries.first { it.value > BMI }.key
-                        })"
+                }
+
+                val desiredPosition = 1 // Between taps (likely index 0) and message/chat (index 1+)
+                if (profileQuickBarViewLinearLayout.childCount >= desiredPosition) {
+                    profileQuickBarViewLinearLayout.addView(customDeetsButton, desiredPosition)
+                } else {
+                    profileQuickBarViewLinearLayout.addView(customDeetsButton)
+                }
+                logd("SUCCESS: Details button added to the quickbar.")
+            }
+
+
+            findClass(profileBarView).hook("a", HookStage.AFTER) { param ->
+                val profileBarViewInstance = param.thisObject()
+                val profileViewState =
+                    param.arg<Any>(0) // The ProfileViewState object passed to the method
+
+                try {
+                    val viewBinding = getObjectField(profileBarViewInstance, "c")
+                    val displayNameTextView = getObjectField(viewBinding, "c") as TextView
+                    val profile = getObjectField(profileViewState, "profile") ?: return@hook
+                    val profileId = callMethod(profile, "getProfileId") as String
+
+                    // ADDED: Click listener to copy profile ID
+                    displayNameTextView.setOnClickListener {
+                        copyToClipboard("Profile ID", profileId)
+                        GrindrPlus.showToast(Toast.LENGTH_SHORT, "Copied Profile ID: $profileId")
+                    }
+
+                    // REVISED: Long-click listener to show hidden details
+                    displayNameTextView.setOnLongClickListener { v ->
+                        try {
+                            val accountCreationTime =
+                                formatEpochSeconds(
+                                    GrindrPlus.spline.invert(profileId.toDouble()).toLong()
+                                )
+
+                            val properties = mapOf(
+                                "Estimated creation" to accountCreationTime,
+                                "Profile ID" to profileId,
+                                "Approximate distance" to Utils.safeGetField(
+                                    profile,
+                                    "approximateDistance"
+                                ) as? Boolean,
+                                "Favorite" to Utils.safeGetField(profile, "isFavorite") as? Boolean,
+                                "From viewed me" to Utils.safeGetField(
+                                    profile,
+                                    "isFromViewedMe"
+                                ) as? Boolean,
+                                "JWT boosting" to Utils.safeGetField(
+                                    profile,
+                                    "isJwtBoosting"
+                                ) as? Boolean,
+                                "New" to Utils.safeGetField(profile, "isNew") as? Boolean,
+                                "Teleporting" to Utils.safeGetField(
+                                    profile,
+                                    "isTeleporting"
+                                ) as? Boolean,
+                                "Online now" to Utils.safeGetField(
+                                    profile,
+                                    "onlineNow"
+                                ) as? Boolean,
+                                "Is roaming" to Utils.safeGetField(
+                                    profile,
+                                    "isRoaming"
+                                ) as? Boolean,
+                                "Found via roam" to Utils.safeGetField(
+                                    profile,
+                                    "foundViaRoam"
+                                ) as? Boolean,
+                                "Is top pick" to Utils.safeGetField(
+                                    profile,
+                                    "isTopPick"
+                                ) as? Boolean,
+                                "Is visiting" to Utils.safeGetField(
+                                    profile,
+                                    "isVisiting"
+                                ) as? Boolean
+                            ).filterValues { it != null }
+
+                            val detailsText = if (properties.isNotEmpty()) {
+                                properties.map { (key, value) -> "• $key: $value" }
+                                    .joinToString("\n")
+                            } else {
+                                "No hidden details available for this profile"
+                            }
+
+                            AlertDialog.Builder(v.context)
+                                .setTitle("Hidden profile details - $profileId")
+                                .setMessage(detailsText)
+                                .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+                                .setNeutralButton("Copy Details") { _, _ ->
+                                    copyToClipboard("Profile Details", detailsText)
+                                    GrindrPlus.showToast(
+                                        Toast.LENGTH_SHORT,
+                                        "Profile details copied"
+                                    )
+                                }
+                                .setNegativeButton("Copy ID") { _, _ ->
+                                    copyToClipboard("Profile ID", profileId)
+                                    GrindrPlus.showToast(Toast.LENGTH_SHORT, "Profile ID copied")
+                                }
+                                .show()
+                                .apply {
+                                    setOnShowListener {
+                                        getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(android.graphics.Color.WHITE)
+                                        getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(android.graphics.Color.WHITE)
+                                        getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.WHITE)
+                                    }
+                                }
+                            true // Consume the long click
+                        } catch (e: Exception) {
+                            Logger.e(
+                                "Error showing profile details: ${e.message}",
+                                source = LogSource.HOOK
+                            )
+                            false
+                        }
+                    }
+                } catch (e: Exception) {
+                    Logger.e(
+                        "Error setting ProfileBarView handlers: ${e.message}",
+                        source = LogSource.HOOK
                     )
+                    Logger.writeRaw(e.stackTraceToString())
+                }
+            }
+
+
+            // Hook for distance display precision
+            findClass(distanceUtils).hook("c", HookStage.AFTER) { param ->
+                val distance = param.arg<Double>(0)
+                val isFeet = param.arg<Boolean>(2)
+
+                param.setResult(
+                    if (isFeet) {
+                        val feet = (distance * 3.280839895).roundToInt()
+                        if (feet < 5280) {
+                            String.format("%d feet", feet)
+                        } else {
+                            String.format("%d miles %d feet", feet / 5280, feet % 5280)
+                        }
+                    } else {
+                        val meters = distance.roundToInt()
+                        if (meters < 1000) {
+                            String.format("%d meters", meters)
+                        } else {
+                            String.format("%d km %d m", meters / 1000, meters % 1000)
+                        }
+                    }
+                )
+            }
+
+            // Hook for BMI display in profile
+            findClass(profileViewState).hook("getWeight", HookStage.AFTER) { param ->
+                if (Config.get("show_bmi_in_profile", true) as Boolean) {
+                    val weight = param.getResult()
+                    val height = callMethod(param.thisObject(), "getHeight")
+
+                    if (weight != null && height != null) {
+                        val BMI = calculateBMI(
+                            "kg" in weight.toString(),
+                            w2n("kg" in weight.toString(), weight.toString()),
+                            h2n("kg" in weight.toString(), height.toString())
+                        )
+                        if (Config.get("do_gui_safety_checks", true) as Boolean) {
+                            if (weight.toString().contains("(")) {
+                                logw("BMI details are already present")
+                                return@hook
+                            }
+                        }
+                        param.setResult(
+                            "$weight - ${String.format("%.1f", BMI)} (${
+                                mapOf(
+                                    "Underweight" to 18.5,
+                                    "Normal weight" to 24.9,
+                                    "Overweight" to 29.9,
+                                    "Obese" to Double.MAX_VALUE
+                                ).entries.first { it.value > BMI }.key
+                            })"
+                        )
+                    }
                 }
             }
         }
     }
-} 
+}
+ 
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\hooks\ProfileViews.kt --- 
 package com.grindrplus.hooks
 
@@ -10090,6 +10389,7 @@ import java.util.*
 import com.grindrplus.ui.Utils.copyToClipboard
 import com.grindrplus.hooks.ProfileViewsTracker
 import android.widget.Toast
+import androidx.core.view.children
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.Logger
 import java.text.SimpleDateFormat
@@ -10099,7 +10399,7 @@ class StatusDialog : Hook(
     "Check whether GrindrPlus is alive or not"
 ) {
     private val tabView = "com.google.android.material.tabs.TabLayout\$TabView"
-
+    private val homeActivityClass = "com.grindrapp.android.ui.home.HomeActivity"
     override fun init() {
         findClass(tabView).hookConstructor(HookStage.AFTER) { param ->
             val tabView = param.thisObject() as View
@@ -10128,6 +10428,37 @@ class StatusDialog : Hook(
                     }
                 }
             }
+        }
+        try {
+
+            // This is the most common, default ID for the toolbar's navigation icon (the hamburger/profile icon)
+            val profileIconId = android.R.id.home
+
+            findClass(homeActivityClass).hookConstructor(HookStage.AFTER) hook@{ param ->
+                val activity = param.thisObject() as? android.app.Activity ?: return@hook
+
+                val toolbarId = activity.resources.getIdentifier("home_toolbar", "id", activity.packageName)
+                if (toolbarId == 0) {
+                    Logger.w("Could not find toolbar resource ID.")
+                    return@hook
+                }
+                val toolbar = activity.findViewById<androidx.appcompat.widget.Toolbar>(toolbarId)
+
+                // The navigation icon isn't a standard child view, so we iterate to find it.
+                // It's often the first child and is an ImageButton.
+                val navButton = toolbar?.children?.find { it is android.widget.ImageButton }
+
+                navButton?.setOnLongClickListener { v ->
+                    Logger.d("Tab 0 long-pressed", LogSource.MODULE)
+                    showProfileViewsDialog(context = v.context)
+                    false
+                }
+                true // Consume the long-click event
+            }
+
+        } catch (e: Exception) {
+            // Log any errors during the hooking process
+            Logger.e("Failed to hook profile icon for long-click: ${e.message}", LogSource.HOOK)
         }
     }
 
@@ -10205,6 +10536,8 @@ class StatusDialog : Hook(
             }
         }
     }
+
+
 
     private fun showProfileViewsDialog(context: Context) {
         GrindrPlus.executeAsync {
@@ -10451,7 +10784,6 @@ import com.grindrplus.persistence.model.AlbumEntity
 import com.grindrplus.utils.Hook
 import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.RetrofitUtils
-import com.grindrplus.utils.RetrofitUtils.SUCCESS_VALUE_NAME
 import com.grindrplus.utils.RetrofitUtils.createSuccess
 import com.grindrplus.utils.RetrofitUtils.getSuccessValue
 import com.grindrplus.utils.RetrofitUtils.isFail
@@ -10461,7 +10793,6 @@ import com.grindrplus.utils.RetrofitUtils.isSuccess
 import com.grindrplus.utils.hook
 import com.grindrplus.utils.hookConstructor
 import com.grindrplus.utils.withSuspendResult
-import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers.getObjectField
 import de.robv.android.xposed.XposedHelpers.setObjectField
 import java.io.Closeable
@@ -10919,75 +11250,84 @@ class UnlimitedAlbums : Hook("Unlimited albums", "Allow to be able to view unlim
             }
         }
 
+    // REVISED AND CORRECTED LOGIC
     @Suppress("UNCHECKED_CAST")
     private fun handleGetAlbumsSharesProfileId(args: Array<Any?>, result: Any) =
         withSuspendResult(args, result) { args, result ->
-            logd("Fetching shared albums for profile ID")
             val profileId = args[0] as? Long ?: return@withSuspendResult result
+            logd("Fetching shared albums for profile ID: $profileId")
 
+            // Step 1: If the network call was successful, update the local database.
             if (result.isSuccess()) {
                 try {
-                    runBlocking {
-                        GrindrPlus.database.withTransaction {
-                            val dao = GrindrPlus.database.albumDao()
-                            val albumBriefs =
-                                getObjectField(result.getSuccessValue(), "albums") as? List<Any>
-                            albumBriefs?.forEach { albumBrief ->
-                                try {
-                                    val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
-                                    dao.upsertAlbum(albumEntity)
-
-                                    val grindrAlbumContent = getObjectField(albumBrief, "content")
-                                    if (grindrAlbumContent != null) {
-                                        val dbAlbumContent =
-                                            grindrAlbumContent.toAlbumContentEntity(albumEntity.id)
-                                        dao.upsertAlbumContent(dbAlbumContent)
+                    val albumBriefs = getObjectField(result.getSuccessValue(), "albums") as? List<Any>
+                    if (!albumBriefs.isNullOrEmpty()) {
+                        logd("Received ${albumBriefs.size} album(s) from network for profile $profileId. Updating local cache.")
+                        runBlocking {
+                            GrindrPlus.database.withTransaction {
+                                val dao = GrindrPlus.database.albumDao()
+                                albumBriefs.forEach { albumBrief ->
+                                    try {
+                                        val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
+                                        // Only upsert if it's for the correct profile
+                                        if (albumEntity.profileId == profileId) {
+                                            dao.upsertAlbum(albumEntity)
+                                            val grindrAlbumContent = getObjectField(albumBrief, "content")
+                                            if (grindrAlbumContent != null) {
+                                                val dbAlbumContent = grindrAlbumContent.toAlbumContentEntity(albumEntity.id)
+                                                dao.upsertAlbumContent(dbAlbumContent)
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        loge("Error processing album brief during update: ${e.message}")
                                     }
-                                } catch (e: Exception) {
-                                    loge("Error processing album brief: ${e.message}")
-                                    Logger.writeRaw(e.stackTraceToString())
                                 }
                             }
                         }
+                    } else {
+                        logd("Network returned empty album list for profile $profileId. Local cache will be preserved.")
                     }
                 } catch (e: Exception) {
-                    loge("Error saving album briefs: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
+                    loge("Error saving album briefs from network: ${e.message}")
                 }
+            } else {
+                logw("Network call failed for profile $profileId albums. Will rely solely on local cache.")
             }
 
+            // Step 2: Always query the local database and return its contents.
             try {
-                val albumBriefs = runBlocking {
+                val albumBriefsFromDb = runBlocking {
                     GrindrPlus.database.withTransaction {
                         val dao = GrindrPlus.database.albumDao()
-                        val dbAlbums = dao.getAlbums(profileId)
+                        val dbAlbums = dao.getAlbums(profileId) // Fetch specifically for this profile
+                        logd("Found ${dbAlbums.size} album(s) in local cache for profile $profileId.")
                         dbAlbums.mapNotNull {
                             try {
                                 val dbContent = dao.getAlbumContent(it.id)
                                 if (dbContent.isNotEmpty()) {
                                     it.toGrindrAlbumBrief(dbContent.first())
                                 } else {
-                                    logw("Album ${it.id} has no content")
+                                    logw("Album ${it.id} from cache has no content, skipping.")
                                     null
                                 }
                             } catch (e: Exception) {
-                                loge("Error converting album ${it.id} to brief: ${e.message}")
-                                Logger.writeRaw(e.stackTraceToString())
+                                loge("Error converting cached album ${it.id} to brief: ${e.message}")
                                 null
                             }
                         }
                     }
                 }
 
-                val newValue =
-                    findClass(sharedAlbumsBrief)
-                        .getConstructor(List::class.java)
-                        .newInstance(albumBriefs)
+                // Create the success response object with the data from our database.
+                val newValue = findClass(sharedAlbumsBrief)
+                    .getConstructor(List::class.java)
+                    .newInstance(albumBriefsFromDb)
 
-                createSuccess(newValue)
+                return@withSuspendResult createSuccess(newValue)
+
             } catch (e: Exception) {
-                loge("Error creating shared albums brief: ${e.message}")
-                result
+                loge("FATAL: Error creating final shared albums brief from database: ${e.message}")
+                return@withSuspendResult result // Fallback to original result on critical error
             }
         }
 
@@ -11009,8 +11349,7 @@ class UnlimitedAlbums : Hook("Unlimited albums", "Allow to be able to view unlim
             }
         }
     }
-}
- 
+} 
 --- File: D:\ANDROID\PROJECTS_GRINDR\4.5-25.12\ReUse140963\app\src\main\java\com\grindrplus\hooks\UnlimitedProfiles.kt --- 
 package com.grindrplus.hooks
 
@@ -11123,49 +11462,20 @@ class UnlimitedProfiles : Hook(
         // FIXED: Only hook swipe gestures, not all profile interactions
         // This was breaking ProfileDetails.kt click handlers
         findClass(onProfileClicked).hook("invokeSuspend", HookStage.BEFORE) { param ->
-            // Only disable swipe if the config is enabled
-            if (!(Config.get("disable_profile_swipe", false) as Boolean)) {
-                return@hook
-            }
-
-            // Try to get the cached profile from the coroutine context
-            val cachedProfile = getObjectField(param.thisObject(), param.thisObject().javaClass.declaredFields
-                .firstOrNull { it.type.name.contains("ServerDrivenCascadeCachedProfile") }?.name
-            )
-
-            if (cachedProfile != null) {
-                runCatching {
-                    val profileId = getObjectField(cachedProfile, "profileIdLong").toString()
-
-                    // CRITICAL: Check if this is a swipe gesture vs a normal click
-                    // Swipe gestures typically come from cascade view, not profile view
-                    // We should only intercept cascade swipes, not ProfileBarView clicks
-
-                    // Get the calling context to determine if this is from cascade or profile view
-                    val stackTrace = Thread.currentThread().stackTrace
-                    val isFromCascade = stackTrace.any {
-                        it.className.contains("Cascade") ||
-                                it.className.contains("browse")
-                    }
-                    val isFromProfileView = stackTrace.any {
-                        it.className.contains("ProfileBarView") ||
-                                it.className.contains("ProfilesActivity")
-                    }
-
-                    // Only intercept cascade swipes, allow profile view clicks
-                    if (isFromCascade && !isFromProfileView) {
-                        openProfile(profileId)
-                        param.setResult(null)
-                        Logger.d("Intercepted cascade swipe for profile: $profileId")
-                    } else {
-                        Logger.d("Allowing profile view click for: $profileId")
-                        // Don't set result - let normal handling continue
-                    }
-                }.onFailure {
-                    loge("Error in profile click handler: ${it.message}")
+            if (Config.get("disable_profile_swipe", false) as Boolean) {
+                getObjectField(param.thisObject(), param.thisObject().javaClass.declaredFields
+                    .firstOrNull { it.type.name.contains("ServerDrivenCascadeCachedProfile") }?.name
+                )?.let { cachedProfile ->
+                    runCatching { getObjectField(cachedProfile, "profileIdLong").toString() }
+                        .onSuccess { profileId ->
+                            openProfile(profileId)
+                            param.setResult(null)
+                        }
+                        .onFailure { loge("Profile ID not found in cached profile") }
                 }
             }
         }
+
 
         // Apply custom filters if enabled
         findClass(serverDrivenCascadeCachedState)
@@ -22368,6 +22678,15 @@ class HookManager {
 package com.grindrplus.utils
 
 import android.util.Base64
+import android.widget.ImageView
+import android.widget.Toast
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import android.content.ContentResolver
+import android.content.ContentValues
+import android.os.Environment
+import android.provider.MediaStore
+import java.io.OutputStream
 import android.webkit.MimeTypeMap
 import com.grindrplus.GrindrPlus
 import com.grindrplus.core.Logger

@@ -15,6 +15,7 @@ import java.util.*
 import com.grindrplus.ui.Utils.copyToClipboard
 import com.grindrplus.hooks.ProfileViewsTracker
 import android.widget.Toast
+import androidx.core.view.children
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.Logger
 import java.text.SimpleDateFormat
@@ -24,7 +25,7 @@ class StatusDialog : Hook(
     "Check whether GrindrPlus is alive or not"
 ) {
     private val tabView = "com.google.android.material.tabs.TabLayout\$TabView"
-
+    private val homeActivityClass = "com.grindrapp.android.ui.home.HomeActivity"
     override fun init() {
         findClass(tabView).hookConstructor(HookStage.AFTER) { param ->
             val tabView = param.thisObject() as View
@@ -53,6 +54,37 @@ class StatusDialog : Hook(
                     }
                 }
             }
+        }
+        try {
+
+            // This is the most common, default ID for the toolbar's navigation icon (the hamburger/profile icon)
+            val profileIconId = android.R.id.home
+
+            findClass(homeActivityClass).hookConstructor(HookStage.AFTER) hook@{ param ->
+                val activity = param.thisObject() as? android.app.Activity ?: return@hook
+
+                val toolbarId = activity.resources.getIdentifier("home_toolbar", "id", activity.packageName)
+                if (toolbarId == 0) {
+                    Logger.w("Could not find toolbar resource ID.")
+                    return@hook
+                }
+                val toolbar = activity.findViewById<androidx.appcompat.widget.Toolbar>(toolbarId)
+
+                // The navigation icon isn't a standard child view, so we iterate to find it.
+                // It's often the first child and is an ImageButton.
+                val navButton = toolbar?.children?.find { it is android.widget.ImageButton }
+
+                navButton?.setOnLongClickListener { v ->
+                    Logger.d("Tab 0 long-pressed", LogSource.MODULE)
+                    showProfileViewsDialog(context = v.context)
+                    false
+                }
+                true // Consume the long-click event
+            }
+
+        } catch (e: Exception) {
+            // Log any errors during the hooking process
+            Logger.e("Failed to hook profile icon for long-click: ${e.message}", LogSource.HOOK)
         }
     }
 
@@ -130,6 +162,8 @@ class StatusDialog : Hook(
             }
         }
     }
+
+
 
     private fun showProfileViewsDialog(context: Context) {
         GrindrPlus.executeAsync {
