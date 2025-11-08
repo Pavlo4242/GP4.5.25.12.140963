@@ -5,6 +5,7 @@ import com.grindrplus.core.Logger
 import com.grindrplus.persistence.model.AlbumContentEntity
 import com.grindrplus.persistence.model.AlbumEntity
 import de.robv.android.xposed.XposedHelpers.getObjectField
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -106,6 +107,35 @@ fun Any.toAlbumContentEntity(albumId: Long): AlbumContentEntity {
             url = null
         )
     }
+}
+
+fun JSONObject.asAlbumToAlbumEntity(): AlbumEntity {
+    return AlbumEntity(
+        id = this.optLong("albumId"),
+        albumName = this.optString("albumName"),
+        createdAt = this.optString("createdAt"),
+        profileId = this.optLong("profileId"),
+        updatedAt = this.optString("updatedAt")
+    )
+}
+
+fun JSONObject.toAlbumContentEntities(): List<AlbumContentEntity> {
+    val albumId = this.optLong("albumId")
+    val contentList = mutableListOf<AlbumContentEntity>()
+    this.optJSONArray("content")?.let { contentArray ->
+        for (i in 0 until contentArray.length()) {
+            val contentJson = contentArray.getJSONObject(i)
+            contentList.add(AlbumContentEntity(
+                id = contentJson.optLong("contentId"),
+                albumId = albumId,
+                contentType = contentJson.optString("contentType"),
+                coverUrl = contentJson.optString("coverUrl"),
+                thumbUrl = contentJson.optString("thumbUrl"),
+                url = contentJson.optString("url")
+            ))
+        }
+    }
+    return contentList
 }
 
 fun AlbumEntity.toGrindrAlbum(dbContent: List<AlbumContentEntity>): Any {

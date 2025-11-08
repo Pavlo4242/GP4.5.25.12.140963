@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import java.io.OutputStream
 import android.webkit.MimeTypeMap
 import com.grindrplus.GrindrPlus
+import com.grindrplus.core.LogSource
 import com.grindrplus.core.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -52,6 +53,69 @@ object MediaUtils {
     private val videoDir: File by lazy {
         File(mediaDir, "videos").apply {
             if (!exists()) mkdirs()
+        }
+    }
+
+    /**
+     * Downloads a media file and saves it to a public, user-accessible directory.
+     * Creates an organized folder structure within Pictures/ or Movies/.
+     */
+    fun saveMediaToPublicDirectory(
+        url: String,
+        albumName: String,
+        profileId: String,
+        contentId: String,
+        contentType: String
+    ) {
+        GrindrPlus.executeAsync { // Ensure this runs in the background
+            val isVideo = contentType.startsWith("video/")
+            val fileExtension = if (isVideo) "mp4" else "jpg"
+            val directoryType = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+
+            // Sanitize folder names to prevent filesystem errors
+            val safeAlbumName = albumName.replace(Regex("[^a-zA-Z0-9.-]"), "_")
+            val safeProfileId = profileId.replace(Regex("[^a-zA-Z0-9.-]"), "_")
+
+            val relativePath = "${directoryType}/GrindrPlus/Albums/${safeProfileId} - ${safeAlbumName}"
+            val fileName = "$contentId.$fileExtension"
+
+            try {
+                val resolver = GrindrPlus.context.contentResolver
+
+                // Check if the file already exists to avoid re-downloading
+                val projection = arrayOf(MediaStore.MediaColumns._ID)
+                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+                val selectionArgs = arrayOf("$relativePath/", fileName)
+                val queryUri = if (isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+
+                resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        Logger.d("Media file already exists, skipping download: $fileName", LogSource.MODULE)
+                        return@executeAsync
+                    }
+                }
+
+                Logger.d("Downloading album media: $fileName")
+                val mediaData = downloadMediaSync(url).getOrThrow()
+
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                }
+
+                val uri = resolver.insert(queryUri, values)
+                if (uri != null) {
+                    resolver.openOutputStream(uri).use { os ->
+                        os?.write(mediaData)
+                    }
+                    Logger.i("Successfully saved album media to gallery: $fileName", LogSource.MODULE)
+                } else {
+                    throw IOException("Failed to create MediaStore entry.")
+                }
+            } catch (e: Exception) {
+                Logger.e("Failed to save public media for $contentId: ${e.message}", LogSource.MODULE)
+            }
         }
     }
 

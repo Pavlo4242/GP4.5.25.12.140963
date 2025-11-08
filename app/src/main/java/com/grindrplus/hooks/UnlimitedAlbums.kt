@@ -1,5 +1,5 @@
-package com.grindrplus.hooks
-
+import android.content.Intent
+import android.view.View
 import android.widget.Toast
 import androidx.room.withTransaction
 import com.grindrplus.GrindrPlus
@@ -19,6 +19,7 @@ import com.grindrplus.persistence.model.AlbumContentEntity
 import com.grindrplus.persistence.model.AlbumEntity
 import com.grindrplus.utils.Hook
 import com.grindrplus.utils.HookStage
+import com.grindrplus.utils.MediaUtils
 import com.grindrplus.utils.RetrofitUtils
 import com.grindrplus.utils.RetrofitUtils.createSuccess
 import com.grindrplus.utils.RetrofitUtils.getSuccessValue
@@ -29,6 +30,7 @@ import com.grindrplus.utils.RetrofitUtils.isSuccess
 import com.grindrplus.utils.hook
 import com.grindrplus.utils.hookConstructor
 import com.grindrplus.utils.withSuspendResult
+import de.robv.android.xposed.XposedHelpers.callMethod
 import de.robv.android.xposed.XposedHelpers.getObjectField
 import de.robv.android.xposed.XposedHelpers.setObjectField
 import java.io.Closeable
@@ -49,9 +51,43 @@ class UnlimitedAlbums : Hook("Unlimited albums", "Allow to be able to view unlim
     private val sharedAlbumsBrief = "com.grindrapp.android.model.albums.SharedAlbumsBrief"
     private val albumsList = "com.grindrapp.android.model.AlbumsList"
 
-    override fun init() {
-        val albumsServiceClass = findClass(albumsService)
+    private val albumThumbView = "com.grindrapp.android.view.albums.AlbumThumbView"
+    private val albumCruiseActivity = "com.grindrapp.android.ui.albums.AlbumCruiseActivity"
 
+    override fun init() {
+        // Bypass album paywall by overwriting the click listener on album thumbnails
+        try {
+            findClass(albumThumbView).hookConstructor(HookStage.AFTER) { param ->
+                val thumbView = param.thisObject() as View
+                val albumDataField = thumbView.javaClass.declaredFields.find {
+                    it.type.name.contains("AlbumBrief")
+                } ?: return@hookConstructor
+
+                albumDataField.isAccessible = true
+                val albumBrief = albumDataField.get(thumbView) ?: return@hookConstructor
+
+                val albumId = getObjectField(albumBrief, "albumId") as Long
+                val profileId = getObjectField(albumBrief, "profileId") as String
+
+                thumbView.setOnClickListener {
+                    try {
+                        val context = it.context
+                        val intent = Intent(context, findClass(albumCruiseActivity))
+                        intent.putExtra("album_id", albumId)
+                        intent.putExtra("profile_id", profileId)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        loge("Failed to launch AlbumCruiseActivity: ${e.message}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            loge("Failed to hook AlbumThumbView: ${e.message}")
+        }
+
+        // Hook API calls to save album data and provide offline access
+        val albumsServiceClass = findClass(albumsService)
         RetrofitUtils.hookService(
             albumsServiceClass,
         ) { originalHandler, proxy, method, args ->
@@ -76,118 +112,70 @@ class UnlimitedAlbums : Hook("Unlimited albums", "Allow to be able to view unlim
             }
         }
 
+        // Generic hooks to make various album-related objects always appear viewable
         findClass(albumModel).hookConstructor(HookStage.AFTER) { param ->
             try {
                 setObjectField(param.thisObject(), "albumViewable", true)
                 setObjectField(param.thisObject(), "viewableUntil", Long.MAX_VALUE)
             } catch (e: Exception) {
                 loge("Error making album viewable: ${e.message}")
-                Logger.writeRaw(e.stackTraceToString())
             }
         }
-
         findClass(spankBankAlbumModel).hookConstructor(HookStage.AFTER) { param ->
             try {
                 setObjectField(param.thisObject(), "albumViewable", true)
                 setObjectField(param.thisObject(), "expiresAt", Long.MAX_VALUE)
             } catch (e: Exception) {
-                loge("Error making album viewable: ${e.message}")
-                Logger.writeRaw(e.stackTraceToString())
+                loge("Error making spank bank album viewable: ${e.message}")
             }
         }
-
         listOf(spankBankAlbumContentModel, filteredSpankBankAlbumContent).forEach { clazz ->
             findClass(clazz).hookConstructor(HookStage.AFTER) { param ->
                 try {
                     setObjectField(param.thisObject(), "albumViewable", true)
                 } catch (e: Exception) {
-                    loge("Error making album viewable: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
+                    loge("Error making spank bank content viewable: ${e.message}")
                 }
             }
         }
-
         findClass(albumModel).hook("isValid", HookStage.BEFORE) { param -> param.setResult(true) }
-
     }
 
-    @Suppress("UNCHECKED_CAST")
-    private suspend fun saveAlbum(grindrAlbum: Any) {
-        try {
-            val dao = GrindrPlus.database.albumDao()
-
-            val dbAlbum = grindrAlbum.asAlbumToAlbumEntity()
-            dao.upsertAlbum(dbAlbum)
-
-            val grindrAlbumContent = getObjectField(grindrAlbum, "content") as? List<Any> ?: return
-            grindrAlbumContent.forEach {
-                try {
-                    val dbAlbumContent = it.toAlbumContentEntity(dbAlbum.id)
-                    dao.upsertAlbumContent(dbAlbumContent)
-                } catch (e: Exception) {
-                    loge("Failed to convert album content: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
-                }
-            }
-        } catch (e: Exception) {
-            loge("Failed to save album: ${e.message}")
-            Logger.writeRaw(e.stackTraceToString())
+    private suspend fun archiveAlbumData(album: AlbumEntity, contents: List<AlbumContentEntity>) {
+        GrindrPlus.database.withTransaction {
+            GrindrPlus.database.albumDao().upsertAlbum(album)
+            GrindrPlus.database.albumDao().upsertAlbumContents(contents)
         }
-    }
-
-    private suspend fun saveAlbumContent(albumId: Long, contentEntities: List<AlbumContentEntity>) {
-        try {
-            val dao = GrindrPlus.database.albumDao()
-
-            val albumExists = dao.albumExists(albumId)
-
-            if (albumExists) {
-                contentEntities.forEach { content -> dao.upsertAlbumContent(content) }
-            } else {
-                logw("Album $albumId doesn't exist, creating placeholder")
-                val currentTime = System.currentTimeMillis().toString()
-                val placeholderAlbum =
-                    AlbumEntity(
-                        id = albumId,
-                        albumName = "Unknown Album",
-                        createdAt = currentTime,
-                        profileId = 0L,
-                        updatedAt = currentTime
-                    )
-                dao.upsertAlbum(placeholderAlbum)
-
-                contentEntities.forEach { content -> dao.upsertAlbumContent(content) }
-            }
-        } catch (e: Exception) {
-            loge("Failed to save album content: ${e.message}")
-            Logger.writeRaw(e.stackTraceToString())
+        logi("Archiving ${contents.size} media items for album '${album.albumName}'")
+        for (content in contents) {
+            val url = content.url ?: continue
+            MediaUtils.saveMediaToPublicDirectory(
+                url = url,
+                albumName = album.albumName ?: "album_${album.id}",
+                profileId = album.profileId.toString(),
+                contentId = content.id.toString(),
+                contentType = content.contentType ?: ""
+            )
         }
     }
 
     private fun handleRemoveAlbumShares(args: Array<Any?>, result: Any) =
-        withSuspendResult(args, result) { args, result ->
+        withSuspendResult(args, result) { _, result ->
             val albumId = args[0] as? Long ?: return@withSuspendResult result
             logi("Removing album shares for ID: $albumId")
-
             if (result.isFail()) {
                 try {
                     runBlocking {
-                        GrindrPlus.database.withTransaction {
-                            val dao = GrindrPlus.database.albumDao()
-                            val albumToDelete = dao.getAlbum(albumId)
-
-                            if (albumToDelete != null) {
-                                dao.deleteAlbum(albumId)
-                                createSuccess(albumId)
-                            } else {
-                                logd("Album with ID $albumId not found in the database")
-                                result
-                            }
+                        val dao = GrindrPlus.database.albumDao()
+                        if (dao.getAlbum(albumId) != null) {
+                            dao.deleteAlbum(albumId)
+                            createSuccess(albumId)
+                        } else {
+                            result
                         }
                     }
                 } catch (e: Exception) {
                     loge("Failed to delete album $albumId: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
                     result
                 }
             } else {
@@ -196,90 +184,102 @@ class UnlimitedAlbums : Hook("Unlimited albums", "Allow to be able to view unlim
         }
 
     private fun handleGetAlbumsViewAlbumId(args: Array<Any?>, result: Any) =
-        withSuspendResult(args, result) { args, result ->
+        withSuspendResult(args, result) { _, result ->
             val albumId = args[0] as? Long ?: return@withSuspendResult result
-            logd("Checking if album $albumId is viewable")
-
             if (!result.isSuccess()) {
-                logw("Album $albumId is not viewable, checking database")
                 runBlocking {
-                    val dao = GrindrPlus.database.albumDao()
-                    val album = dao.getAlbum(albumId)
-                    if (album != null) {
-                        logd("Album $albumId is viewable, returning success")
+                    if (GrindrPlus.database.albumDao().albumExists(albumId)) {
+                        logd("Album $albumId is viewable via database, returning success")
                         createSuccess(true)
                     } else {
-                        logd("Album $albumId is not viewable, returning failure")
                         result
                     }
                 }
+            } else {
+                result
             }
-
-            result
         }
 
     private fun handleGetAlbum(args: Array<Any?>, result: Any) =
-        withSuspendResult(args, result) { args, result ->
-            val albumId = args[0] as? Long ?: return@withSuspendResult result
-            logd("Fetching album with ID: $albumId")
+        withSuspendResult(args, result) { _, initialResult ->
+            val albumId = args[0] as? Long ?: return@withSuspendResult initialResult
+
+            if (initialResult.isSuccess()) {
+                logd("v2/albums/$albumId succeeded. Archiving result.")
+                val grindrAlbum = initialResult.getSuccessValue()
+                runBlocking {
+                    val albumEntity = grindrAlbum.asAlbumToAlbumEntity()
+                    val contentList = (getObjectField(grindrAlbum, "content") as? List<Any> ?: emptyList())
+                        .map { it.toAlbumContentEntity(albumId) }
+                    archiveAlbumData(albumEntity, contentList)
+                }
+                return@withSuspendResult initialResult
+            }
+
+            logw("v2/albums/$albumId failed. Trying v1 fallback and then database.")
 
             try {
                 GrindrPlus.httpClient
                     .sendRequest(url = "https://grindr.mobi/v1/albums/$albumId", method = "GET")
                     .use { response ->
                         val responseBody = response.body?.string()
-                        if (!responseBody.isNullOrEmpty()) {
-                            logd("Got ${responseBody.length} bytes for album $albumId")
-                            val modifiedResult = parseAlbumContent(albumId, responseBody, result)
-                            return@withSuspendResult modifiedResult
-                        } else {
-                            loge("Empty response body for album $albumId")
-                            val modifiedResult = fetchAlbumFromDatabase(albumId, result)
-                            return@withSuspendResult modifiedResult
+                        if (response.isSuccessful && !responseBody.isNullOrEmpty()) {
+                            logi("v1/albums/$albumId fallback SUCCEEDED. Parsing and archiving.")
+                            val json = JSONObject(responseBody)
+                            val albumEntity = jsonToAlbumEntity(albumId, json)
+                            val contentEntities = jsonToAlbumContentEntities(albumId, json)
+
+                            runBlocking { archiveAlbumData(albumEntity, contentEntities) }
+
+                            val grindrAlbumObject = albumEntity.toGrindrAlbum(contentEntities)
+                            return@withSuspendResult createSuccess(grindrAlbumObject)
                         }
                     }
             } catch (e: Exception) {
-                loge("Failed to fetch album $albumId: ${e.message}")
-                Logger.writeRaw(e.stackTraceToString())
-                GrindrPlus.showToast(Toast.LENGTH_LONG, "Failed to load album")
-                val modifiedResult = fetchAlbumFromDatabase(albumId, result)
-                return@withSuspendResult modifiedResult
+                loge("v1/albums/$albumId fallback failed: ${e.message}")
             }
+
+            logd("All network fallbacks failed for album $albumId. Checking local database.")
+            return@withSuspendResult fetchAlbumFromDatabase(albumId, initialResult)
         }
 
+    private fun jsonToAlbumEntity(albumId: Long, json: JSONObject): AlbumEntity {
+        return AlbumEntity(
+            id = albumId,
+            albumName = json.optString("albumName", "Unknown Album"),
+            createdAt = json.optString("createdAt", System.currentTimeMillis().toString()),
+            profileId = json.optLong("profileId", 0L),
+            updatedAt = json.optString("updatedAt", System.currentTimeMillis().toString())
+        )
+    }
+
+    private fun jsonToAlbumContentEntities(albumId: Long, json: JSONObject): List<AlbumContentEntity> {
+        val contentList = mutableListOf<AlbumContentEntity>()
+        json.optJSONArray("content")?.let { contentArray ->
+            for (i in 0 until contentArray.length()) {
+                val contentJson = contentArray.getJSONObject(i)
+                contentList.add(AlbumContentEntity(
+                    id = contentJson.optLong("contentId"),
+                    albumId = albumId,
+                    contentType = contentJson.optString("contentType"),
+                    coverUrl = contentJson.optString("coverUrl"),
+                    thumbUrl = contentJson.optString("thumbUrl"),
+                    url = contentJson.optString("url")
+                ))
+            }
+        }
+        return contentList
+    }
+
     private fun fetchAlbumFromDatabase(albumId: Long, originalResult: Any): Any {
-        try {
-            loge("Fetching album with ID: $albumId from database")
-            return runBlocking {
+        return try {
+            runBlocking {
                 val dao = GrindrPlus.database.albumDao()
                 val album = dao.getAlbum(albumId)
                 if (album != null) {
                     val content = dao.getAlbumContent(albumId)
-                    var albumObject = getObjectField(originalResult, "a")
-
-                    if (
-                        albumObject != null && albumObject.javaClass.name == httpExceptionResponse
-                    ) {
-                        logw(
-                            "Album object is HttpExceptionResponse, creating new Album from entity"
-                        )
-                        albumObject = album.toGrindrAlbumWithoutContent()
-                    }
-
-                    if (albumObject != null) {
-                        setObjectField(albumObject, "albumId", albumId)
-                        setObjectField(
-                            albumObject,
-                            "content",
-                            content.map { it.toGrindrAlbumContent() }
-                        )
-                        setObjectField(albumObject, "albumViewable", true)
-                        setObjectField(albumObject, "viewableUntil", Long.MAX_VALUE)
-                        createSuccess(albumObject)
-                    } else {
-                        loge("Album is null, cannot set content")
-                        originalResult
-                    }
+                    val albumObject = album.toGrindrAlbum(content)
+                    createSuccess(albumObject)
                 } else {
                     logw("Album $albumId not found in database")
                     originalResult
@@ -287,283 +287,160 @@ class UnlimitedAlbums : Hook("Unlimited albums", "Allow to be able to view unlim
             }
         } catch (e: Exception) {
             loge("Failed to load album $albumId from database: ${e.message}")
-            Logger.writeRaw(e.stackTraceToString())
-            return originalResult
+            originalResult
         }
-    }
-
-    private fun parseAlbumContent(albumId: Long, responseBody: String, originalResult: Any): Any {
-        try {
-            logd("Parsing album content for ID: $albumId")
-            val jsonResponse = JSONObject(responseBody)
-            jsonResponse.optJSONArray("content")?.let { contentArray ->
-                logd("Content array found for album ID: $albumId")
-                val albumContentEntities = mutableListOf<AlbumContentEntity>()
-
-                for (i in 0 until contentArray.length()) {
-                    try {
-                        val contentJson = contentArray.getJSONObject(i)
-                        val albumContentEntity =
-                            AlbumContentEntity(
-                                id = contentJson.optLong("contentId"),
-                                albumId = albumId,
-                                contentType = contentJson.optString("contentType"),
-                                coverUrl = contentJson.optString("coverUrl"),
-                                thumbUrl = contentJson.optString("thumbUrl"),
-                                url = contentJson.optString("url")
-                            )
-                        albumContentEntities.add(albumContentEntity)
-                    } catch (e: Exception) {
-                        loge("Error parsing content item: ${e.message}")
-                        Logger.writeRaw(e.stackTraceToString())
-                    }
-                }
-
-                if (albumContentEntities.isNotEmpty()) {
-                    logd("Saving album content for ID: $albumId")
-                    try {
-                        runBlocking { saveAlbumContent(albumId, albumContentEntities) }
-                    } catch (e: Exception) {
-                        loge("Failed to save album content: ${e.message}")
-                        Logger.writeRaw(e.stackTraceToString())
-                    }
-                }
-
-                try {
-                    val grindrAlbumContentList =
-                        albumContentEntities.map { it.toGrindrAlbumContent() }
-                    val albumObject = getObjectField(originalResult, "a")
-                    if (albumObject != null) {
-                        logd("Setting album content for ID: $albumId")
-                        setObjectField(albumObject, "content", grindrAlbumContentList)
-                        return originalResult
-                    } else {
-                        loge("Album object not found in result for album ID: $albumId")
-                    }
-                } catch (e: Exception) {
-                    loge("Error setting album content: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
-                }
-            }
-                ?: run {
-                    loge("Failed to parse content array for album ID: $albumId")
-                    return fetchAlbumFromDatabase(albumId, originalResult)
-                }
-        } catch (e: Exception) {
-            loge("Error parsing album content: ${e.message}")
-            Logger.writeRaw(e.stackTraceToString())
-            return fetchAlbumFromDatabase(albumId, originalResult)
-        }
-
-        return originalResult
     }
 
     @Suppress("UNCHECKED_CAST")
     private fun handleGetAlbums(args: Array<Any?>, result: Any) =
-        withSuspendResult(args, result) { args, result ->
+        withSuspendResult(args, result) { _, result ->
             if (result.isSuccess()) {
                 try {
                     val albums = getObjectField(result.getSuccessValue(), "albums") as? List<Any>
                     if (albums != null) {
                         runBlocking {
-                            GrindrPlus.database.withTransaction {
-                                albums.forEach { album ->
-                                    try {
-                                        saveAlbum(album)
-                                    } catch (e: Exception) {
-                                        loge("Error saving album: ${e.message}")
-                                        Logger.writeRaw(e.stackTraceToString())
-                                    }
+                            albums.forEach { album ->
+                                try {
+                                    val albumEntity = album.asAlbumToAlbumEntity()
+                                    val contentList = (getObjectField(album, "content") as? List<Any> ?: emptyList())
+                                        .map { it.toAlbumContentEntity(albumEntity.id) }
+                                    archiveAlbumData(albumEntity, contentList)
+                                } catch (e: Exception) {
+                                    loge("Error saving album: ${e.message}")
                                 }
                             }
                         }
                     }
                 } catch (e: Exception) {
                     loge("Error processing albums: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
                 }
             }
 
             try {
                 val albums = runBlocking {
-                    GrindrPlus.database.withTransaction {
-                        val dao = GrindrPlus.database.albumDao()
-                        val dbAlbums = dao.getAlbums()
-                        dbAlbums.mapNotNull {
-                            try {
-                                val dbContent = dao.getAlbumContent(it.id)
-                                it.toGrindrAlbum(dbContent)
-                            } catch (e: Exception) {
-                                loge("Error converting album ${it.id}: ${e.message}")
-                                Logger.writeRaw(e.stackTraceToString())
-                                null
-                            }
+                    GrindrPlus.database.albumDao().getAlbums().mapNotNull {
+                        try {
+                            val dbContent = GrindrPlus.database.albumDao().getAlbumContent(it.id)
+                            it.toGrindrAlbum(dbContent)
+                        } catch (e: Exception) {
+                            null
                         }
                     }
                 }
-
-                val newValue =
-                    findClass(albumsList)
-                        .getConstructor(List::class.java)
-                        .newInstance(albums)
-
+                val newValue = findClass(albumsList).getConstructor(List::class.java).newInstance(albums)
                 createSuccess(newValue)
             } catch (e: Exception) {
-                loge("Error creating albums list: ${e.message}")
-                Logger.writeRaw(e.stackTraceToString())
+                loge("Error creating albums list from database: ${e.message}")
                 result
             }
         }
 
     @Suppress("UNCHECKED_CAST")
     private fun handleGetAlbumsShares(args: Array<Any?>, result: Any) =
-        withSuspendResult(args, result) { args, result ->
-            logd("Fetching shared albums")
+        withSuspendResult(args, result) { _, result ->
             if (result.isSuccess()) {
                 try {
                     runBlocking {
-                        GrindrPlus.database.withTransaction {
-                            val dao = GrindrPlus.database.albumDao()
-                            val albumBriefs =
-                                getObjectField(result.getSuccessValue(), "albums") as? List<Any>
-                            albumBriefs?.forEach { albumBrief ->
-                                try {
-                                    val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
-                                    dao.upsertAlbum(albumEntity)
-
-                                    val grindrAlbumContent = getObjectField(albumBrief, "content")
-                                    if (grindrAlbumContent != null) {
-                                        val dbAlbumContent =
-                                            grindrAlbumContent.toAlbumContentEntity(albumEntity.id)
-                                        dao.upsertAlbumContent(dbAlbumContent)
-                                    }
-                                } catch (e: Exception) {
-                                    loge("Error processing album brief: ${e.message}")
-                                    Logger.writeRaw(e.stackTraceToString())
-                                }
+                        val albumBriefs = getObjectField(result.getSuccessValue(), "albums") as? List<Any>
+                        albumBriefs?.forEach { albumBrief ->
+                            try {
+                                val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
+                                val content = getObjectField(albumBrief, "content")
+                                val contentList = if (content != null) listOf(content.toAlbumContentEntity(albumEntity.id)) else emptyList()
+                                archiveAlbumData(albumEntity, contentList)
+                            } catch (e: Exception) {
+                                loge("Error processing album brief: ${e.message}")
                             }
                         }
                     }
                 } catch (e: Exception) {
                     loge("Error saving album briefs: ${e.message}")
-                    Logger.writeRaw(e.stackTraceToString())
                 }
             }
-
             try {
                 val albumBriefs = runBlocking {
-                    GrindrPlus.database.withTransaction {
-                        val dao = GrindrPlus.database.albumDao()
-                        val dbAlbums = dao.getAlbums()
-                        dbAlbums.mapNotNull {
-                            try {
-                                val dbContent = dao.getAlbumContent(it.id)
-                                if (dbContent.isNotEmpty()) {
-                                    it.toGrindrAlbumBrief(dbContent.first())
-                                } else {
-                                    logw("Album ${it.id} has no content")
-                                    null
-                                }
-                            } catch (e: Exception) {
-                                loge("Error converting album ${it.id} to brief: ${e.message}")
-                                Logger.writeRaw(e.stackTraceToString())
-                                null
-                            }
+                    GrindrPlus.database.albumDao().getAlbums().mapNotNull {
+                        try {
+                            val dbContent = GrindrPlus.database.albumDao().getAlbumContent(it.id)
+                            if (dbContent.isNotEmpty()) it.toGrindrAlbumBrief(dbContent.first()) else null
+                        } catch (e: Exception) {
+                            null
                         }
                     }
                 }
-
-                val newValue =
-                    findClass(sharedAlbumsBrief)
-                        .getConstructor(List::class.java)
-                        .newInstance(albumBriefs)
-
+                val newValue = findClass(sharedAlbumsBrief).getConstructor(List::class.java).newInstance(albumBriefs)
                 createSuccess(newValue)
             } catch (e: Exception) {
-                loge("Error creating shared albums brief: ${e.message}")
-                Logger.writeRaw(e.stackTraceToString())
+                loge("Error creating shared albums brief from database: ${e.message}")
                 result
             }
         }
 
-    // REVISED AND CORRECTED LOGIC
     @Suppress("UNCHECKED_CAST")
     private fun handleGetAlbumsSharesProfileId(args: Array<Any?>, result: Any) =
-        withSuspendResult(args, result) { args, result ->
+        withSuspendResult(args, result) { _, result ->
             val profileId = args[0] as? Long ?: return@withSuspendResult result
             logd("Fetching shared albums for profile ID: $profileId")
 
-            // Step 1: If the network call was successful, update the local database.
             if (result.isSuccess()) {
                 try {
                     val albumBriefs = getObjectField(result.getSuccessValue(), "albums") as? List<Any>
                     if (!albumBriefs.isNullOrEmpty()) {
-                        logd("Received ${albumBriefs.size} album(s) from network for profile $profileId. Updating local cache.")
+                        logd("Received ${albumBriefs.size} album(s) from network. Checking for locked albums...")
                         runBlocking {
-                            GrindrPlus.database.withTransaction {
-                                val dao = GrindrPlus.database.albumDao()
-                                albumBriefs.forEach { albumBrief ->
+                            for (albumBrief in albumBriefs) {
+                                val isViewable = getObjectField(albumBrief, "albumViewable") as? Boolean ?: false
+                                val currentAlbumId = getObjectField(albumBrief, "albumId") as Long
+
+                                val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
+                                val content = getObjectField(albumBrief, "content")
+                                val contentList = if (content != null) listOf(content.toAlbumContentEntity(albumEntity.id)) else emptyList()
+
+                                if (isViewable) {
+                                    archiveAlbumData(albumEntity, contentList)
+                                } else {
+                                    logi("Found locked album $currentAlbumId. Attempting v1 fallback unlock.")
                                     try {
-                                        val albumEntity = albumBrief.asAlbumBriefToAlbumEntity()
-                                        // Only upsert if it's for the correct profile
-                                        if (albumEntity.profileId == profileId) {
-                                            dao.upsertAlbum(albumEntity)
-                                            val grindrAlbumContent = getObjectField(albumBrief, "content")
-                                            if (grindrAlbumContent != null) {
-                                                val dbAlbumContent = grindrAlbumContent.toAlbumContentEntity(albumEntity.id)
-                                                dao.upsertAlbumContent(dbAlbumContent)
+                                        GrindrPlus.httpClient.sendRequest(
+                                            url = "https://grindr.mobi/v1/albums/$currentAlbumId", method = "GET"
+                                        ).use { v1Response ->
+                                            val v1Body = v1Response.body?.string()
+                                            if (v1Response.isSuccessful && !v1Body.isNullOrEmpty()) {
+                                                logi("v1 fallback for $currentAlbumId SUCCEEDED. Archiving.")
+                                                val json = JSONObject(v1Body)
+                                                val unlockedAlbumEntity = jsonToAlbumEntity(currentAlbumId, json)
+                                                val unlockedContentEntities = jsonToAlbumContentEntities(currentAlbumId, json)
+                                                archiveAlbumData(unlockedAlbumEntity, unlockedContentEntities)
                                             }
                                         }
                                     } catch (e: Exception) {
-                                        loge("Error processing album brief during update: ${e.message}")
+                                        loge("Exception during v1 fallback for $currentAlbumId: ${e.message}")
                                     }
                                 }
                             }
                         }
-                    } else {
-                        logd("Network returned empty album list for profile $profileId. Local cache will be preserved.")
                     }
                 } catch (e: Exception) {
-                    loge("Error saving album briefs from network: ${e.message}")
+                    loge("Error during proactive album unlocking: ${e.message}")
                 }
-            } else {
-                logw("Network call failed for profile $profileId albums. Will rely solely on local cache.")
             }
 
-            // Step 2: Always query the local database and return its contents.
             try {
                 val albumBriefsFromDb = runBlocking {
-                    GrindrPlus.database.withTransaction {
-                        val dao = GrindrPlus.database.albumDao()
-                        val dbAlbums = dao.getAlbums(profileId) // Fetch specifically for this profile
-                        logd("Found ${dbAlbums.size} album(s) in local cache for profile $profileId.")
-                        dbAlbums.mapNotNull {
-                            try {
-                                val dbContent = dao.getAlbumContent(it.id)
-                                if (dbContent.isNotEmpty()) {
-                                    it.toGrindrAlbumBrief(dbContent.first())
-                                } else {
-                                    logw("Album ${it.id} from cache has no content, skipping.")
-                                    null
-                                }
-                            } catch (e: Exception) {
-                                loge("Error converting cached album ${it.id} to brief: ${e.message}")
-                                null
-                            }
+                    GrindrPlus.database.albumDao().getAlbums(profileId).mapNotNull {
+                        try {
+                            val dbContent = GrindrPlus.database.albumDao().getAlbumContent(it.id)
+                            if (dbContent.isNotEmpty()) it.toGrindrAlbumBrief(dbContent.first()) else null
+                        } catch (e: Exception) {
+                            null
                         }
                     }
                 }
-
-                // Create the success response object with the data from our database.
-                val newValue = findClass(sharedAlbumsBrief)
-                    .getConstructor(List::class.java)
-                    .newInstance(albumBriefsFromDb)
-
+                val newValue = findClass(sharedAlbumsBrief).getConstructor(List::class.java).newInstance(albumBriefsFromDb)
                 return@withSuspendResult createSuccess(newValue)
-
             } catch (e: Exception) {
                 loge("FATAL: Error creating final shared albums brief from database: ${e.message}")
-                return@withSuspendResult result // Fallback to original result on critical error
+                return@withSuspendResult result
             }
         }
 

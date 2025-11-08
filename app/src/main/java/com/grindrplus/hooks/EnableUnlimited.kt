@@ -99,6 +99,13 @@ class EnableUnlimited : Hook(
             }
         }
 
+        findClass(paywallUtils).hook("i", HookStage.BEFORE) { param ->
+            // This is the paywall check triggered when tapping a locked album.
+            // The stack trace confirms this is the method being called.
+            // By returning false, we tell the app the feature is not paywalled.
+            param.setResult(false)
+        }
+
         findClass(paywallUtils).hook("e", HookStage.BEFORE) { param ->
             val stackTrace = Thread.currentThread().stackTrace.dropWhile {
                 !it.toString().contains("LSPHooker") }.drop(1).joinToString("\n")

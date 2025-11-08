@@ -5,17 +5,21 @@ import android.graphics.Color
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.widget.AppCompatTextView
+import androidx.room.withTransaction
 import com.grindrplus.GrindrPlus
 import com.grindrplus.core.Config
 import com.grindrplus.core.DatabaseHelper
 import com.grindrplus.core.LogSource
 import com.grindrplus.core.Logger
 import com.grindrplus.persistence.GPDatabase
+import com.grindrplus.persistence.mappers.asAlbumToAlbumEntity
+import com.grindrplus.persistence.mappers.toAlbumContentEntities
 import com.grindrplus.ui.Utils.copyToClipboard
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.grindrplus.ui.Utils.formatEpochSeconds
+import org.json.JSONObject
 
 private const val ENABLE_LOGGING = true
 
@@ -48,6 +52,95 @@ class Database(
      */
 
     private val ioScope = CoroutineScope(Dispatchers.IO)
+
+    @Command(name = "savealbums", aliases = ["archivealbums"], help = "Fetches and saves all albums shared with you to the local database")
+    fun saveAllAlbums(args: List<String>) {
+        GrindrPlus.runOnMainThread {
+            Toast.makeText(it, "Starting album archival... This may take a while.", Toast.LENGTH_SHORT).show()
+        }
+
+        GrindrPlus.executeAsync {
+            var profileCount = 0
+            var albumCount = 0
+            val albumDao = GrindrPlus.database.albumDao()
+
+            try {
+                // Step 1: Get all profiles that have shared albums with you
+                val sharedResponse = GrindrPlus.httpClient.sendRequest(
+                    url = "https://grindr.mobi/v2/albums/shares",
+                    method = "GET"
+                )
+
+                if (!sharedResponse.isSuccessful) {
+                    throw Exception("Failed to get initial list of shared albums.")
+                }
+
+                val sharedJson = JSONObject(sharedResponse.body?.string())
+                val albumBriefs = sharedJson.optJSONArray("albums") ?: org.json.JSONArray()
+                val profileIds = (0 until albumBriefs.length())
+                    .map { albumBriefs.getJSONObject(it).optString("profileId") }
+                    .filter { it.isNotEmpty() }
+                    .toSet()
+
+                profileCount = profileIds.size
+                Logger.i("Found $profileCount profiles with shared albums. Starting fetch...")
+
+                // Step 2: Iterate through each profile and get their albums
+                for (profileId in profileIds) {
+                    try {
+                        val profileAlbumsResponse = GrindrPlus.httpClient.sendRequest(
+                            url = "https://grindr.mobi/v2/albums/shares/$profileId",
+                            method = "GET"
+                        )
+                        if (!profileAlbumsResponse.isSuccessful) continue
+
+                        val profileAlbumsJson = JSONObject(profileAlbumsResponse.body?.string())
+                        val profileAlbumBriefs = profileAlbumsJson.optJSONArray("albums") ?: continue
+
+                        // Step 3: Iterate through each album and fetch its full content
+                        for (i in 0 until profileAlbumBriefs.length()) {
+                            val albumId = profileAlbumBriefs.getJSONObject(i).optLong("albumId")
+                            if (albumId == 0L) continue
+
+                            try {
+                                val fullAlbumResponse = GrindrPlus.httpClient.sendRequest(
+                                    url = "https://grindr.mobi/v2/albums/$albumId",
+                                    method = "GET"
+                                )
+                                if (!fullAlbumResponse.isSuccessful) continue
+
+                                val albumJson = JSONObject(fullAlbumResponse.body?.string())
+                                val albumEntity = albumJson.asAlbumToAlbumEntity()
+                                val contentEntities = albumJson.toAlbumContentEntities()
+
+                                // Step 4: Save to database
+                                GrindrPlus.database.withTransaction {
+                                    albumDao.upsertAlbum(albumEntity)
+                                    albumDao.upsertAlbumContents(contentEntities)
+                                }
+                                albumCount++
+                                Logger.d("Successfully saved album $albumId from profile $profileId")
+                            } catch (e: Exception) {
+                                Logger.e("Failed to process album $albumId for profile $profileId: ${e.message}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Logger.e("Failed to fetch albums for profile $profileId: ${e.message}")
+                    }
+                }
+
+                GrindrPlus.runOnMainThread {
+                    Toast.makeText(it, "Album archival complete! Saved $albumCount albums from $profileCount profiles.", Toast.LENGTH_LONG).show()
+                }
+
+            } catch (e: Exception) {
+                Logger.e("Failed to archive albums: ${e.message}")
+                GrindrPlus.runOnMainThread {
+                    Toast.makeText(it, "Error during album archival. Check logs.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     @Command(name = "populateLocations", aliases = ["populate_teleports", "init_teleports"], help = "Populates the teleport location database with default locations if empty or configured locations")
     fun populateLocations(args: List<String>) {
