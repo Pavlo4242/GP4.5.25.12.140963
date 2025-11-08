@@ -16,6 +16,8 @@ import com.grindrplus.persistence.model.AlbumEntity
 import com.grindrplus.persistence.model.SavedPhraseEntity
 import com.grindrplus.persistence.model.TeleportLocationEntity
 import android.database.sqlite.SQLiteDatabase
+import com.grindrplus.core.LogSource
+import com.grindrplus.core.Logger
 import com.grindrplus.persistence.dao.LogDao
 import com.grindrplus.persistence.dao.ProfileDao
 import kotlinx.coroutines.CoroutineScope
@@ -57,21 +59,23 @@ abstract class GPDatabase : RoomDatabase() {
     abstract fun logDao(): LogDao
 
     object DatabaseManager {
-        private var isReady = false
-        private val pendingLogs = mutableListOf<() -> Unit>()
+        private val readyLatch = java.util.concurrent.CountDownLatch(1)
 
         fun markReady() {
-            isReady = true
-            pendingLogs.forEach { it() }
-            pendingLogs.clear()
+            readyLatch.countDown()
         }
 
         fun executeWhenReady(block: () -> Unit) {
-            if (isReady) {
-                block()
-            } else {
-                pendingLogs += block
-            }
+            // Spawn a new thread to wait, so we don't block the calling thread (e.g., UI thread)
+            Thread {
+                try {
+                    readyLatch.await(5, java.util.concurrent.TimeUnit.SECONDS) // Wait up to 5 seconds
+                    block()
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    Logger.e("DatabaseManager was interrupted while waiting.", LogSource.DB)
+                }
+            }.start()
         }
     }
 

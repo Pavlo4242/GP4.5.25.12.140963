@@ -58,7 +58,7 @@ object CredentialsLogger {
                         device_info = lDeviceInfo,
                         user_agent = userAgent
                     )
-
+                    GrindrPlus.database.logDao().insert(entity)
                 }
             } catch (e: Exception) {
                 Logger.e("Failed to write credentials: ${e.message}")

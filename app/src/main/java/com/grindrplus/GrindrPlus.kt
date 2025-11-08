@@ -42,6 +42,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
+import timber.log.Timber
 import java.io.File
 import java.io.IOException
 import java.lang.ref.WeakReference
@@ -101,6 +102,7 @@ object GrindrPlus {
         )
     )
 
+    //MySettingsViewModel(GrindrPlus.hookManager, GrindrPlus.taskManager)
 
     val currentActivity: Activity?
         get() = currentActivityRef?.get()
@@ -136,6 +138,9 @@ object GrindrPlus {
         this.bridgeClient = BridgeClient(context)
 
         Logger.initialize(context, bridgeClient, true)
+        if (Timber.forest().isEmpty()) {
+            Timber.plant(Timber.DebugTree())
+            }
         Logger.i("Initializing GrindrPlus...", LogSource.MODULE)
 
         checkVersionCodes(versionCodes, versionNames)

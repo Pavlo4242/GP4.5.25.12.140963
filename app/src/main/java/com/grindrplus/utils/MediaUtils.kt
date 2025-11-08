@@ -21,6 +21,7 @@ import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -92,6 +93,7 @@ object MediaUtils {
      */
     fun ByteArray.saveToFile(file: File): Result<Boolean> = runCatching {
         FileOutputStream(file).use { it.write(this) }
+        Timber.d("Successfully saved Media")
         true
     }
 
@@ -197,7 +199,9 @@ object MediaUtils {
                 Logger.d("Saved ${mediaType.name.lowercase()} for mediaId $mediaId to ${mediaFile.absolutePath}")
             }
 
+            Timber.i("${mediaFile.absolutePath}")
             "file://${mediaFile.absolutePath}"
+
         }.onFailure {
             Logger.e("Error saving ${mediaType.name.lowercase()} file: ${it.message}")
         }

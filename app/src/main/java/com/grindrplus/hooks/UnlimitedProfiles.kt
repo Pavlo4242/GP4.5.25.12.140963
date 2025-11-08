@@ -5,12 +5,14 @@ import com.grindrplus.core.Config
 import com.grindrplus.core.Utils.openProfile
 import com.grindrplus.core.Logger
 import com.grindrplus.core.loge
+import com.grindrplus.core.logi
 import com.grindrplus.utils.Hook
 import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.hook
 import de.robv.android.xposed.XposedHelpers.callMethod
 import de.robv.android.xposed.XposedHelpers.callStaticMethod
 import de.robv.android.xposed.XposedHelpers.getObjectField
+import de.robv.android.xposed.XposedHelpers.setObjectField
 import java.lang.reflect.Proxy
 
 class UnlimitedProfiles : Hook(
@@ -44,6 +46,10 @@ class UnlimitedProfiles : Hook(
         findClass(serverDrivenCascadeCachedProfile)
             .hook("getUpsellType", HookStage.BEFORE) { param ->
                 param.setResult(null)
+            }
+        findClass(serverDrivenCascadeCachedProfile) // Also force isBlockable to true for paywalled profiles
+            .hook("isBlockable", HookStage.BEFORE) { param ->
+                param.setResult(true)
             }
 
         val profileClass = findClass("com.grindrapp.android.persistence.model.Profile")
@@ -83,8 +89,9 @@ class UnlimitedProfiles : Hook(
                         if (profileId !in profileIdSet) {
                             val profile = profileConstructor.newInstance()
                             callMethod(profile, "setProfileId", profileId)
-                            callMethod(profile, "setRemoteUpdatedTime", 1L)
+                            callMethod(profile, "setRemoteUpdatedTime", 0L)
                             callMethod(profile, "setLocalUpdatedTime", 0L)
+
                             missingProfiles.add(
                                 profileWithPhotoConstructor.newInstance(profile, emptyList<Any>())
                             )
@@ -109,17 +116,36 @@ class UnlimitedProfiles : Hook(
         // FIXED: Only hook swipe gestures, not all profile interactions
         // This was breaking ProfileDetails.kt click handlers
         findClass(onProfileClicked).hook("invokeSuspend", HookStage.BEFORE) { param ->
-            if (Config.get("disable_profile_swipe", false) as Boolean) {
-                getObjectField(param.thisObject(), param.thisObject().javaClass.declaredFields
-                    .firstOrNull { it.type.name.contains("ServerDrivenCascadeCachedProfile") }?.name
-                )?.let { cachedProfile ->
-                    runCatching { getObjectField(cachedProfile, "profileIdLong").toString() }
-                        .onSuccess { profileId ->
-                            openProfile(profileId)
-                            param.setResult(null)
-                        }
-                        .onFailure { loge("Profile ID not found in cached profile") }
+            try {
+                // Find the field that holds the profile data within the click handler's scope.
+                val profileDataField = param.thisObject().javaClass.declaredFields
+                    .firstOrNull { it.type.name == serverDrivenCascadeCachedProfile }
+
+                if (profileDataField == null) {
+                    loge("Could not find ServerDrivenCascadeCachedProfile field in click handler.")
+                    return@hook
                 }
+
+                profileDataField.isAccessible = true
+                val cachedProfile = profileDataField.get(param.thisObject())
+
+                // Extract the profileId directly from this reliable object.
+                // The field name can vary slightly, so we try a few common ones.
+                val profileId = getObjectField(cachedProfile, "profileId") as? Long
+                    ?: getObjectField(cachedProfile, "profileIdLong") as? Long
+
+                if (profileId != null) {
+                    logi("Intercepted click for profile ID $profileId. Opening profile manually.")
+                    openProfile(profileId.toString())
+
+                    // This is the most important part: prevent the original, crash-inducing method from running.
+                    param.setResult(null)
+                } else {
+                    loge("Successfully intercepted click, but could not extract profileId from cachedProfile object.")
+                }
+            } catch (t: Throwable) {
+                loge("Error in onProfileClicked interceptor: ${t.message}")
+                Logger.writeRaw(t.stackTraceToString())
             }
         }
 

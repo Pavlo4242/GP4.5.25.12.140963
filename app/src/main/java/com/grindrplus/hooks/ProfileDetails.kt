@@ -332,6 +332,7 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
 
             // Click listener to copy profile ID
             textView.setOnClickListener {
+                logd("Display name short-clicked for profile ID: $profileId. Attempting to copy ID.")
                 copyToClipboard("Profile ID", profileId)
                 GrindrPlus.showToast(Toast.LENGTH_SHORT, "Copied Profile ID: $profileId")
             }
@@ -339,6 +340,7 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
             // Long-click listener to show hidden details
             textView.setOnLongClickListener { v ->
                 try {
+                    logd("Display name LONG-clicked for profile ID: $profileId. Attempting to show deets.")
                     showProfileDetailsDialog(v.context, sourceObject)
                     true // Consume the long click
                 } catch (e: Exception) {
