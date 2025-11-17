@@ -350,8 +350,8 @@ val hookSettings = hooks
         TextSettingWithButtons(
             id = "maps_api_key",
             title = "Maps API Key",
-            description = "Use a custom Maps API Key when using Grindr Plus with LSPatch",
-            value = Config.get("maps_api_key", "AIzaSyBiSsM5tTzGxaXTBYMkLoVn1revrbOtVEY") as String, // Prepopulated Key
+            description = "Use a custom Maps API Key when using Grindr Plus with LSPatch", //AIzaSyB // before B
+            value = Config.get("maps_api_key", "BiSsM5tTzGxaXTBYMkLoVn1") as String, // Prepopulated Key // aft 1 revrbOtVEY // 
             onValueChange = {
                 viewModelScope.launch {
                     Config.put("maps_api_key", it)
