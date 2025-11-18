@@ -375,6 +375,19 @@ Gender values: 1=Man, 2=Trans, 3=Non-binary, 4=Cis Woman, 5=Trans Woman, 6=Cis M
     }
 
     @Command(
+        name = "grid_columns",
+        aliases = ["gc"],
+        help = "Set main grid columns. Usage: grid_columns <3-6>"
+    )
+    fun setGridColumns(args: List<String>) {
+        val cols = args.getOrNull(0)?.toIntOrNull() ?: 3
+        if (cols in 2..6) {
+            Config.put("cascade_grid_columns", cols)
+            GrindrPlus.showToast(Toast.LENGTH_SHORT, "Grid set to $cols columns. Restart app.")
+        }
+    }
+
+    @Command(
         name = "filter_reset",
         aliases = ["fr"],
         help = "Reset all filters to default (disabled)"

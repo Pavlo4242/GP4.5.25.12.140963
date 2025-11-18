@@ -8,6 +8,7 @@ import com.grindrplus.hooks.AllowScreenshots
 import com.grindrplus.hooks.AntiBlock
 import com.grindrplus.hooks.AntiDetection
 import com.grindrplus.hooks.BanManagement
+import com.grindrplus.hooks.CascadeGrid
 import com.grindrplus.hooks.ChatIndicators
 import com.grindrplus.hooks.ChatTerminal
 import com.grindrplus.hooks.DisableAnalytics
@@ -30,6 +31,7 @@ import com.grindrplus.hooks.QuickBlock
 import com.grindrplus.hooks.StatusDialog
 import com.grindrplus.hooks.TimberLogging
 import com.grindrplus.hooks.UnlimitedProfiles
+import com.grindrplus.hooks.ViewedMe
 import com.grindrplus.hooks.WebSocketAlive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -69,6 +71,8 @@ class HookManager {
                 EmptyCalls(),
                 ProfileViewsTracker(),
                 SaveMediaOnLongPress(),
+                ViewedMe(),
+                (CascadeGrid()) ,
                 UnlimitedAlbums()
             )
 

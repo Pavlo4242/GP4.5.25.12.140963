@@ -53,12 +53,19 @@ class SaveMediaOnLongPress : Hook(
 
                             try {
                                 val intent = activity.intent
-                                val url = intent.getStringExtra("IMAGE_URL") ?: intent.getStringExtra("VIDEO_URL")
-                                ?: intent.getStringExtra("image_url") ?: intent.getStringExtra("video_url")
-                                ?: intent.dataString
+
+                                // Check all known possible keys for media URLs
+                                val url = intent.getStringExtra("IMAGE_URL")
+                                    ?: intent.getStringExtra("VIDEO_URL")
+                                    ?: intent.getStringExtra("image_url")
+                                    ?: intent.getStringExtra("video_url")
+                                    ?: intent.getStringExtra("url")
+                                    ?: intent.getStringExtra("media_url")
+                                    ?: intent.dataString
 
                                 if (url.isNullOrEmpty()) {
-                                    throw IllegalStateException("Media URL not found in Intent extras.")
+                                    GrindrPlus.showToast(Toast.LENGTH_SHORT, "Error: Could not find media URL.")
+                                    return@setOnLongClickListener true
                                 }
 
                                 GrindrPlus.showToast(Toast.LENGTH_SHORT, "Saving media...")
@@ -66,6 +73,7 @@ class SaveMediaOnLongPress : Hook(
                                 val isVideo = url.contains(".mp4") || activityClassName.contains("Video")
                                 val contentType = if (isVideo) "video/mp4" else "image/jpeg"
                                 val contentId = url.substringAfterLast("/").substringBefore("?")
+                                    .substringBefore(".") // Ensure extension isn't part of ID
 
                                 val albumName = when {
                                     activityClassName.contains("Album") -> "Albums"
@@ -74,7 +82,9 @@ class SaveMediaOnLongPress : Hook(
                                     else -> "Saved Media"
                                 }
 
-                                val profileId = intent.getStringExtra("profile_id") ?: "UnknownProfile"
+                                val profileId = intent.getStringExtra("profile_id")
+                                    ?: intent.getStringExtra("profileId")
+                                    ?: "UnknownProfile"
 
                                 MediaUtils.saveMediaToPublicDirectory(
                                     url = url,
@@ -83,11 +93,10 @@ class SaveMediaOnLongPress : Hook(
                                     contentId = contentId,
                                     contentType = contentType
                                 )
-                                GrindrPlus.showToast(Toast.LENGTH_LONG, "Media saved to gallery!")
 
                             } catch (e: Exception) {
                                 loge("Failed to save media on long-press: ${e.message}")
-                                GrindrPlus.showToast(Toast.LENGTH_LONG, "Error: Could not save media.")
+                                GrindrPlus.showToast(Toast.LENGTH_LONG, "Error: ${e.message}")
                                 Logger.writeRaw(e.stackTraceToString())
                             }
 
@@ -105,8 +114,6 @@ class SaveMediaOnLongPress : Hook(
     }
 
     private fun findTargetView(view: View): View? {
-        // From the Frida logs, we know the video player is a 'GrindrVideoView'.
-        // For images, it could be a 'PhotoView', 'TouchImageView', or similar.
         val className = view.javaClass.name.lowercase()
         val targetClasses = listOf("photoview", "videoview", "playerview", "touchimageview", "grindrvideoview")
 
