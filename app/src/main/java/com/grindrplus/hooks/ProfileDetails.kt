@@ -51,7 +51,7 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
     private val distanceUtils = "com.grindrapp.android.utils.DistanceUtils"
     private val profileBarView = "com.grindrapp.android.ui.profileV2.ProfileBarView"
     private val profileViewState = "com.grindrapp.android.ui.profileV2.model.ProfileViewState"
-    private val profileFragment = "com.grindrapp.android.ui.profileV2.ProfileFragment" // ADDED
+   // private val profileFragment = "com.grindrapp.android.ui.profileV2.ProfileFragment" // ADDED
 
     private val serverDrivenCascadeCachedState =
         "com.grindrapp.android.persistence.model.serverdrivencascade.ServerDrivenCascadeCacheState"
@@ -108,7 +108,7 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
         }
 
         // ADDED: Hook for main profile fragment to attach click listeners to display name
-        findClass(profileFragment).hook("onViewCreated", HookStage.AFTER) { param ->
+   /*     findClass(profileFragment).hook("onViewCreated", HookStage.AFTER) { param ->
             try {
                 val fragment = param.thisObject()
                 val view = param.arg<View>(0)
@@ -142,7 +142,7 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
                 loge("Error in profile fragment hook: ${e.message}")
             }
         }
-
+*/
         // REVISED HOOK: Attach listeners in the data binding method for reliability.
         findClass(profileQuickBarView).hookConstructor(stage = HookStage.AFTER) { param ->
             val profileQuickBarViewInstance = param.thisObject()

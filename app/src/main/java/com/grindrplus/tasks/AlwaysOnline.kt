@@ -6,6 +6,7 @@ import com.grindrplus.core.Logger
 import com.grindrplus.core.Utils.coordsToGeoHash
 import com.grindrplus.core.loge
 import com.grindrplus.core.logi
+import com.grindrplus.core.logw
 import com.grindrplus.utils.Task
 import de.robv.android.xposed.XposedHelpers.callMethod
 import de.robv.android.xposed.XposedHelpers.getObjectField
@@ -24,31 +25,28 @@ class AlwaysOnline :
             val grindrLocationProviderInstance =
                 GrindrPlus.instanceManager.getInstance<Any>(GrindrPlus.grindrLocationProvider)
 
+            // Add a safety check to ensure the required instances are available before proceeding.
+            if (serverDrivenCascadeRepoInstance == null || grindrLocationProviderInstance == null) {
+                logw("Required instances for AlwaysOnline task are not available yet. Skipping this run.")
+                return
+            }
+
             val location = getObjectField(grindrLocationProviderInstance, "e")
             val latitude = callMethod(location, "getLatitude") as Double
             val longitude = callMethod(location, "getLongitude") as Double
             val geoHash = coordsToGeoHash(latitude, longitude)
-
             val methodName = "fetchCascadePage"
+
+            // The '!!' is no longer needed because we already checked for null.
             val method =
-                serverDrivenCascadeRepoInstance!!.javaClass.methods.firstOrNull {
+                serverDrivenCascadeRepoInstance.javaClass.methods.firstOrNull {
                     it.name == methodName
                 } ?: throw IllegalStateException("Unable to find $methodName method")
 
             val params = arrayOf<Any?>(
-                geoHash,
-                null,
-                false, false, false, false,
-                null, null, null,
-                null, null, null, null,
-                null, null, null, null,
-                null, null, null, null,
-                false,
-                1,
-                null, null,
-                false, false, false,
-                null,
-                false
+                geoHash, null, false, false, false, false, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                null, null, false, 1, null, null, false, false, false, null, false
             )
 
             val result = callSuspendFunction { continuation ->

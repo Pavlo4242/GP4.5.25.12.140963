@@ -44,6 +44,8 @@ class Interceptor(
 
                 builder.header("L-Time-Zone", TimeZone.getDefault().id)
 
+
+
                 // search for 'public final kotlin.Lazy' in deviceInfo
                 val deviceInfoLazy = getFieldSafe(deviceInfo, "d") as? Any
                 val lDeviceInfo = if (deviceInfoLazy != null) {
@@ -58,12 +60,17 @@ class Interceptor(
             } else {
                 builder.header("L-Time-Zone", "Unknown")
             }
+// SPOOF HEADER //
+
+            val spoofedUserAgent = "grindr3/25.16.0.144399;144399;Free;Android 13;SM-S908U;Samsung"
+            builder.header("User-Agent", spoofedUserAgent)
+
 
             // search for 'getValue().getNameTitleCase()' in userAgent
-            val userAgentString = invokeMethodSafe(userAgent, "a") as? String ?: "Grindr"
+          //  val userAgentString = invokeMethodSafe(userAgent, "a") as? String ?: "Grindr"
 
+            //      builder.header("User-Agent", userAgentString)
             builder.header("Accept", "application/json; charset=UTF-8")
-            builder.header("User-Agent", userAgentString)
             builder.header("L-Locale", "en_US")
             builder.header("Accept-language", "en-US")
 

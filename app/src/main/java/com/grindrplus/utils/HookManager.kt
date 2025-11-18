@@ -1,5 +1,7 @@
 package com.grindrplus.utils
 
+import com.grindrplus.hooks.SaveMediaOnLongPress
+import com.grindrplus.hooks.UnlimitedAlbums
 import com.grindrplus.core.Config
 import com.grindrplus.core.Logger
 import com.grindrplus.hooks.AllowScreenshots
@@ -25,10 +27,8 @@ import com.grindrplus.hooks.ProfileDetails
 import com.grindrplus.hooks.ProfileViews
 import com.grindrplus.hooks.ProfileViewsTracker
 import com.grindrplus.hooks.QuickBlock
-import com.grindrplus.hooks.SaveMediaOnLongPress
 import com.grindrplus.hooks.StatusDialog
 import com.grindrplus.hooks.TimberLogging
-import com.grindrplus.hooks.UnlimitedAlbums
 import com.grindrplus.hooks.UnlimitedProfiles
 import com.grindrplus.hooks.WebSocketAlive
 import kotlinx.coroutines.Dispatchers

@@ -90,7 +90,7 @@ class BanManagement : Hook(
         findClass(bannedFragment)
             .hook("onViewCreated", HookStage.AFTER) { param ->
                 try {
-                    val view = param.args()[0] as View
+                   /* val view = param.args()[0] as View
                     val context = view.context
 
                     val manageSubscriptionId = context.resources.getIdentifier("manage_subscription", "id", context.packageName)
@@ -119,10 +119,33 @@ class BanManagement : Hook(
                             val verticalPadding = dpToPx(context, 14)
                             safeCallMethod(newButton, "setPadding", horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
                         } catch (e: Exception) {
-                            loge("Error copying padding: ${e.message}")
-                        }
+                            loge("Error copying padding: ${e.message}")*/
+                    val view = param.arg<View>(0)
+                                        // Post the action to the view's message queue to run after the layout is inflated.
+                                        view.post {
+                                            val context = view.context
+                                            val buttonLayoutId = context.resources.getIdentifier("layout_ban_screen_buttons", "id", context.packageName)
+                                            val buttonLayout = view.findViewById<LinearLayout>(buttonLayoutId)
 
-                        safeCallMethod(newButton, "setCornerRadius", safeCallMethod(manageSubscriptionButton, "getCornerRadius"))
+                                            if (buttonLayout != null) {
+                                                // Use a standard, compatible Button to avoid theme crashes.
+                                                val newButton = android.widget.Button(context, null, android.R.attr.buttonStyle).apply {
+                                                    text = "Show Ban Details"
+                                                 setOnClickListener {
+                                                   if (bannedInfo.length() == 0) {
+                                                            Toast.makeText(context, "No ban details available", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                         createBanDetailsDialog(context, bannedInfo)
+                                                      }
+                                                }
+                                             }
+                                           buttonLayout.addView(newButton)
+                                         } else {
+                                       loge("BannedFragment: Could not find button layout.")
+
+                }
+
+                      /*  safeCallMethod(newButton, "setCornerRadius", safeCallMethod(manageSubscriptionButton, "getCornerRadius"))
                         safeCallMethod(newButton, "setRippleColor", safeCallMethod(manageSubscriptionButton, "getRippleColor"))
                         safeCallMethod(newButton, "setStrokeColor", safeCallMethod(manageSubscriptionButton, "getStrokeColor"))
                         safeCallMethod(newButton, "setStrokeWidth", safeCallMethod(manageSubscriptionButton, "getStrokeWidth"))
@@ -141,7 +164,7 @@ class BanManagement : Hook(
                             }
                         })
 
-                        buttonLayout.addView(newButton)
+                        buttonLayout.addView(newButton)*/
                     }
                 } catch (e: Exception) {
                     loge("BannedFragment: Error in hook: ${e.message}")

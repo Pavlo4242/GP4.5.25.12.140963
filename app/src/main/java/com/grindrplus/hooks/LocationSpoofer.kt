@@ -202,6 +202,19 @@ class LocationSpoofer : Hook(
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.WHITE)
         }
+        val textViewName = TextView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 8
+                marginStart = 70
+                marginEnd = 70
+            }
+            gravity = Gravity.CENTER_HORIZONTAL
+            textSize = 14f
+            setTextColor(Color.WHITE)
+        }
 
         val spinnerLocations = Spinner(context).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -234,9 +247,14 @@ class LocationSpoofer : Hook(
         spinnerLocations.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
                 textViewCoordinates.text = coordinatesMap[locationNames.getOrNull(position)]
+
+                textViewName.text = locationNames.getOrNull(position) ?: ""
+
+                GrindrPlus.showToast(Toast.LENGTH_SHORT, "Location resolved: ${locationNames.getOrNull(position) ?: "None"}")
             }
             override fun onNothingSelected(parent: AdapterView<*>) {
                 textViewCoordinates.text = ""
+                textViewName.text = ""
             }
         }
 
@@ -283,8 +301,16 @@ class LocationSpoofer : Hook(
                 background = Utils.createButtonDrawable(Color.parseColor("#2196F3"))
                 setTextColor(Color.WHITE)
                 setOnClickListener {
-                    Config.put("current_location", textViewCoordinates.text.toString())
-                    GrindrPlus.showToast(Toast.LENGTH_LONG, "Successfully teleported to ${textViewCoordinates.text}")
+                    val coords = textViewCoordinates.text.toString()
+                    val name = spinnerLocations.selectedItem?.toString() ?: "Unknown"
+                    Config.put("current_location", coords)
+
+                    var teleportCount = Config.get("teleport_count", 0) as Int
+                    teleportCount++
+                    Config.put("teleport_count", teleportCount)
+                    if (teleportCount % 7 == 0) {
+                        GrindrPlus.showToast(Toast.LENGTH_LONG, "Successfully teleported to $name ($coords)")
+                    }
                 }
             }
             buttonsContainer.addView(buttonSet)
@@ -333,6 +359,8 @@ class LocationSpoofer : Hook(
         scrollView.addView(buttonsContainer)
         locationDialogView.addView(spinnerLocations)
         locationDialogView.addView(textViewCoordinates)
+
+        locationDialogView.addView(textViewName)
         locationDialogView.addView(scrollView)
 
         AlertDialog.Builder(context).apply {

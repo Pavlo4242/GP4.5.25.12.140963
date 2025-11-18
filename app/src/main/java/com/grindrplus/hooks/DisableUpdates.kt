@@ -21,8 +21,10 @@ class DisableUpdates : Hook(
     private val versionInfoEndpoint =
         "https://raw.githubusercontent.com/R0rt1z2/GrindrPlus/master/version.json"
     private val appUpdateInfo = "com.google.android.play.core.appupdate.AppUpdateInfo"
-    private val appUpdateZzm = "com.google.android.play.core.appupdate.zzm" // search for 'requestUpdateInfo(%s)'
-    private val appUpgradeManager = "K9.z" // search for 'Uri.parse("market://details?id=com.grindrapp.android");'
+    private val appUpdateZzm =
+        "com.google.android.play.core.appupdate.zzm" // search for 'requestUpdateInfo(%s)'
+    private val appUpgradeManager =
+        "K9.z" // search for 'Uri.parse("market://details?id=com.grindrapp.android");'
     private val appConfiguration = "com.grindrapp.android.platform.config.AppConfiguration"
     private var versionCode: Int = 0
     private var versionName: String = ""
@@ -47,6 +49,9 @@ class DisableUpdates : Hook(
             .hook("zza", HookStage.BEFORE) { param ->
                 param.setResult(null)
             }
+    }
+}
+/*
 
         Thread {
             fetchLatestVersionInfo()
@@ -118,4 +123,4 @@ class DisableUpdates : Hook(
             logd("Current version is up-to-date: $versionName ($versionCode)")
         }
     }
-}
+}*/

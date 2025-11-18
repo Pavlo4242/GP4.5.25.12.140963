@@ -123,15 +123,15 @@ class Profile(
                 dialogView.addView(textView)
 
                 AlertDialog.Builder(activity)
-                    .setTitle("Blocked users")
+                    .setTitle("GrindrPlus")
                     .setView(dialogView)
                     .setPositiveButton("Copy") { _, _ ->
-                        copyToClipboard("Blocked users", blocks.joinToString("\n") { it })
+                        copyToClipboard("Coords", blocks.joinToString("\n") { it })
                     }
                     .setNegativeButton("Close") { dialog, _ ->
                         dialog.dismiss()
                     }
-                    .setNeutralButton("Export") { _, _ ->
+                    .setNeutralButton("SomeFUnction") { _, _ ->
                         val file = GrindrPlus.context.getFileStreamPath("blocks.txt")
                         file.writeText(blocks.joinToString("\n") { it })
                         GrindrPlus.showToast(

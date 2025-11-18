@@ -34,10 +34,12 @@ class WebSocketAlive : Hook(
             }
 
             findClass(safeDkLifecycleManager).hook("a", HookStage.BEFORE) { param ->
-                val isBackground = param.arg<Boolean>(0)
-                if (isBackground) {
-                    logd("Preventing SafeDK from setting background state")
-                    param.setResult(null)
+                if (param.args().isNotEmpty()) {
+                    val isBackground = param.arg<Boolean>(0)
+                    if (isBackground) {
+                        logd("Preventing SafeDK from setting background state")
+                        param.setResult(null)
+                    }
                 }
             }
 
