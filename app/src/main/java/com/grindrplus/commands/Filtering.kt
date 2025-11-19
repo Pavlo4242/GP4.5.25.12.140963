@@ -1,7 +1,5 @@
 package com.grindrplus.commands
 
-
-
 import android.app.AlertDialog
 import android.widget.Toast
 import com.grindrplus.GrindrPlus
@@ -15,8 +13,6 @@ private fun logOutput(tag: String, message: String) {
         android.util.Log.d("GrindrPlusFilter", "$tag: $message")
     }
 }
-
-
 
 class Filtering(recipient: String, sender: String) : CommandModule(
     "Filtering",
@@ -37,6 +33,37 @@ class Filtering(recipient: String, sender: String) : CommandModule(
         logOutput("FILTER_TOGGLE", message)
         GrindrPlus.showToast(android.widget.Toast.LENGTH_SHORT, message)
     }
+
+    @Command(
+        name = "favorites_columns",
+        aliases = ["fc"],
+        help = "Set favorites grid columns. Usage: fc <2-6>"
+    )
+    fun setFavoritesColumns(args: List<String>) {
+        val cols = args.getOrNull(0)?.toIntOrNull()
+        if (cols == null || cols !in 2..6) {
+            GrindrPlus.showToast(Toast.LENGTH_LONG, "Invalid column count. Use 2-6.")
+            return
+        }
+        Config.put("favorites_grid_columns", cols)
+        GrindrPlus.showToast(Toast.LENGTH_SHORT, "Favorites grid set to $cols columns.")
+    }
+
+    @Command(
+        name = "grid_columns",
+        aliases = ["gc"],
+        help = "Set main cascade grid columns. Usage: gc <2-6>"
+    )
+    fun setGridColumns(args: List<String>) {
+        val cols = args.getOrNull(0)?.toIntOrNull()
+        if (cols == null || cols !in 2..6) {
+            GrindrPlus.showToast(Toast.LENGTH_LONG, "Invalid column count. Use 2-6.")
+            return
+        }
+        Config.put("cascade_grid_columns", cols)
+        GrindrPlus.showToast(Toast.LENGTH_SHORT, "Main grid set to $cols columns.")
+    }
+
 
     @Command(
         name = "filter_distance",
@@ -337,6 +364,8 @@ Filter Status:
 Filtering Commands:
 
 /filter (f) - Toggle custom filtering on/off
+/favorites_columns (fc) <2-6> - Set columns for Favorites grid
+/grid_columns (gc) <2-6> - Set columns for Main grid
 /filter_distance (fd) <meters> - Set max distance filter (0 to disable)
 /filter_favorites (ff) - Toggle favorites-only filter
 /filter_gender (fg) <0-7> - Set gender filter (0=all, 1-7=specific)
@@ -371,19 +400,6 @@ Gender values: 1=Man, 2=Trans, 3=Non-binary, 4=Cis Woman, 5=Trans Woman, 6=Cis M
                 }
                 .create()
                 .show()
-        }
-    }
-
-    @Command(
-        name = "grid_columns",
-        aliases = ["gc"],
-        help = "Set main grid columns. Usage: grid_columns <3-6>"
-    )
-    fun setGridColumns(args: List<String>) {
-        val cols = args.getOrNull(0)?.toIntOrNull() ?: 3
-        if (cols in 2..6) {
-            Config.put("cascade_grid_columns", cols)
-            GrindrPlus.showToast(Toast.LENGTH_SHORT, "Grid set to $cols columns. Restart app.")
         }
     }
 

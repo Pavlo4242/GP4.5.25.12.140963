@@ -126,7 +126,7 @@ object MediaUtils {
         }
     }
 
-    fun downloadMedia(url: String): Result<ByteArray> = runCatching {
+    suspend fun downloadMedia(url: String): Result<ByteArray> = runCatching {
         suspendCancellableCoroutine { continuation ->
             val request = Request.Builder()
                 .url(url)

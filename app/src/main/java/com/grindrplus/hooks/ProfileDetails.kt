@@ -145,50 +145,49 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
 */
         // REVISED HOOK: Attach listeners in the data binding method for reliability.
         findClass(profileQuickBarView).hookConstructor(stage = HookStage.AFTER) { param ->
-            val profileQuickBarViewInstance = param.thisObject()
-            val profileQuickBarViewLinearLayout = param.thisObject() as LinearLayout
+            val profileQuickBarViewInstance = param.thisObject() // Remove the LinearLayout cast
+
+            // Get the context from the view
+            val context = callMethod(profileQuickBarViewInstance, "getContext") as Context
 
             // Post the logic to run after the view has been initialized and laid out
-            profileQuickBarViewLinearLayout.post {
+            val view = profileQuickBarViewInstance as android.view.View
+            view.post {
                 logd("ProfileDetails: post() block executed for ProfileQuickbarView.")
 
-                if (profileQuickBarViewLinearLayout.children.any { it.tag == "profile_deets" }) {
+                // Check if button already exists using View.findViewWithTag
+                val existingButton = view.findViewWithTag<View>("profile_deets")
+                if (existingButton != null) {
                     logd("Button already exists. Skipping.")
                     return@post
                 }
 
-                val exampleButton = profileQuickBarViewLinearLayout.children.firstOrNull()
-                if (exampleButton == null) {
+                // Get the first child to use as template (this should work with ViewGroup)
+                val exampleButton = if (view is android.view.ViewGroup && view.childCount > 0) {
+                    view.getChildAt(0)
+                } else {
                     loge("FAILURE: ProfileQuickbarView has no child buttons to use as a template.")
                     return@post
                 }
 
                 val grindrContext: Context
                 try {
-                    grindrContext =
-                        GrindrPlus.context.createPackageContext(Constants.GRINDR_PACKAGE_NAME, 0)
+                    grindrContext = GrindrPlus.context.createPackageContext(Constants.GRINDR_PACKAGE_NAME, 0)
                 } catch (e: Exception) {
                     loge("FAILURE: Could not create package context. Button cannot be added. Error: ${e.message}")
                     return@post
                 }
 
-                val rippleDrawableId =
-                    com.grindrplus.ui.Utils.getId("image_button_ripple", "drawable", grindrContext)
-                val infoIconId = com.grindrplus.ui.Utils.getId(
-                    "ic_info",
-                    "drawable",
-                    grindrContext
-                )
+                val rippleDrawableId = com.grindrplus.ui.Utils.getId("image_button_ripple", "drawable", grindrContext)
+                val infoIconId = com.grindrplus.ui.Utils.getId("ic_info", "drawable", grindrContext)
 
                 if (rippleDrawableId == 0 || infoIconId == 0) {
                     loge("FAILURE: Required resources for details button not found.")
                     return@post
                 }
 
-                val customDeetsButton = ImageButton(profileQuickBarViewLinearLayout.context).apply {
-                    layoutParams =
-                        LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT)
-                            .apply { weight = 1f }
+                val customDeetsButton = ImageButton(context).apply {
+                    layoutParams = exampleButton.layoutParams // Copy layout params from existing button
                     focusable = ImageButton.FOCUSABLE
                     scaleType = ImageView.ScaleType.CENTER
                     isClickable = true
@@ -207,8 +206,7 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
                         drawable.colorFilter = BlendModeColorFilter(grindrGray, BlendMode.SRC_IN)
                     } else {
                         @Suppress("DEPRECATION")
-                        drawable.colorFilter =
-                            PorterDuffColorFilter(grindrGray, PorterDuff.Mode.SRC_IN)
+                        drawable.colorFilter = PorterDuffColorFilter(grindrGray, PorterDuff.Mode.SRC_IN)
                     }
                 }
 
@@ -218,19 +216,23 @@ class ProfileDetails : Hook("Profile details", "Add extra fields and details to 
                             showProfileDetailsDialog(it.context, profileQuickBarViewInstance)
                         } catch (e: Exception) {
                             loge("Error showing profile details: ${e.message}")
-                            Toast.makeText(it.context, "Failed to load details", Toast.LENGTH_SHORT)
-                                .show()
+                            Toast.makeText(it.context, "Failed to load details", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
 
-                val desiredPosition = 1
-                if (profileQuickBarViewLinearLayout.childCount >= desiredPosition) {
-                    profileQuickBarViewLinearLayout.addView(customDeetsButton, desiredPosition)
+                // Add the button to the quickbar view
+                if (view is android.view.ViewGroup) {
+                    val desiredPosition = 1
+                    if (view.childCount >= desiredPosition) {
+                        view.addView(customDeetsButton, desiredPosition)
+                    } else {
+                        view.addView(customDeetsButton)
+                    }
+                    logd("SUCCESS: Details button added to the quickbar.")
                 } else {
-                    profileQuickBarViewLinearLayout.addView(customDeetsButton)
+                    loge("FAILURE: ProfileQuickbarView is not a ViewGroup, cannot add button")
                 }
-                logd("SUCCESS: Details button added to the quickbar.")
             }
         }
 
