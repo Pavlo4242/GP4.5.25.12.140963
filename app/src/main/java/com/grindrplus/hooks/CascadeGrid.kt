@@ -2,96 +2,144 @@ package com.grindrplus.hooks
 
 import android.view.View
 import android.view.ViewGroup
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import android.widget.ImageView
 import com.grindrplus.GrindrPlus
 import com.grindrplus.core.Config
+import com.grindrplus.core.Utils.openProfile
+import com.grindrplus.core.logd
+import com.grindrplus.core.loge
 import com.grindrplus.ui.Utils
 import com.grindrplus.utils.Hook
 import com.grindrplus.utils.HookStage
 import com.grindrplus.utils.hook
 import de.robv.android.xposed.XposedHelpers.callMethod
-import de.robv.android.xposed.XposedHelpers.findClass
+import de.robv.android.xposed.XposedHelpers.getObjectField
 
 class CascadeGrid : Hook(
     "CascadeGrid",
     "Customize columns for the main cascade (Browse)"
 ) {
-    // Update this class name if it differs in your version.
-    // Use Frida/Layout Inspector to confirm. Common names:
-    // com.grindrapp.android.ui.browse.BrowseFragment
-    // com.grindrapp.android.fragment.CascadeFragment
-    private val browseFragment = "com.grindrapp.android.ui.browse.BrowseFragment"
+    private val browseFragment = "com.grindrapp.android.ui.browse.CascadeFragment"
 
     override fun init() {
-        findClass(browseFragment)
-            .hook("onViewCreated", HookStage.AFTER) { param ->
-                val columns = Config.get("cascade_grid_columns", 4) as Int // Default to 4
+        findClass(browseFragment).hook("onViewCreated", HookStage.AFTER) { param ->
+            try {
+                logd("CascadeGrid: onViewCreated hooked")
+                val columns = Config.get("cascade_grid_columns", 4) as Int
                 val view = param.arg<View>(0)
 
-                // Find the main RecyclerView (ID often matches the favorites one or is 'recycler_view')
-                val recyclerView = view.findViewById<RecyclerView>(
-                    Utils.getId("fragment_feed_recycler_view", "id", GrindrPlus.context)
-                ) ?: view.findViewById<RecyclerView>(
-                    Utils.getId("recycler_view", "id", GrindrPlus.context)
-                ) ?: return@hook
+                // 1. Find RecyclerView as a generic View to avoid ClassCastException
+                val recyclerViewId = Utils.getId("recycler_view", "id", GrindrPlus.context)
+                val recyclerView = view.findViewById<View>(recyclerViewId)
 
-                val layoutManager = recyclerView.layoutManager as? GridLayoutManager ?: return@hook
+                if (recyclerView == null) {
+                    loge("CascadeGrid: RecyclerView not found with ID 'recycler_view'")
+                    return@hook
+                }
+                logd("CascadeGrid: Found RecyclerView: ${recyclerView.javaClass.name}")
 
-                // Set the new span count
-                layoutManager.spanCount = columns
+                // 2. Get LayoutManager via reflection
+                val layoutManager = callMethod(recyclerView, "getLayoutManager")
+                if (layoutManager == null) {
+                    loge("CascadeGrid: LayoutManager is null")
+                    return@hook
+                }
+                logd("CascadeGrid: LayoutManager type: ${layoutManager.javaClass.name}")
 
-                // CRITICAL: Handle SpanSizeLookup
-                // The cascade has ads, upsells, and headers. We don't want those squished into 1 column.
-                // We wrap the existing lookup to preserve logic for non-profile items.
-                val originalLookup = layoutManager.spanSizeLookup
+                // Check if it is a GridLayoutManager (by name check to avoid casting)
+                if (layoutManager.javaClass.name.contains("GridLayoutManager")) {
+                    val oldSpan = callMethod(layoutManager, "getSpanCount") as Int
+                    logd("CascadeGrid: Current SpanCount: $oldSpan. Setting to: $columns")
 
-                layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
-                    override fun getSpanSize(position: Int): Int {
-                        // Ask the adapter what type of view this is
-                        val adapter = recyclerView.adapter ?: return 1
-                        val viewType = adapter.getItemViewType(position)
+                    callMethod(layoutManager, "setSpanCount", columns)
 
-                        // Heuristic: Typically Profiles have a specific ViewType ID.
-                        // If we can't identify the exact ID, we assume anything taking up 1 span
-                        // in a standard 3-grid is a profile.
-                        // However, a safer bet is checking if the original lookup thought it was full width.
+                    // Note: Custom SpanSizeLookup logic removed to prevent ClassCastException.
+                    // Headers may appear 1-column wide, but the crash will be gone.
+                } else {
+                    loge("CascadeGrid: LayoutManager is not a GridLayoutManager, skipping span update.")
+                }
 
-                        val originalSpan = originalLookup.getSpanSize(position)
-                        val originalSpanCount = 3 // Standard Grindr grid
+                // 3. Fix Adapter (Thumbnails & Clicks)
+                fixAdapter(recyclerView, columns)
 
-                        // If the item was previously taking up the FULL width (e.g. Header/Ad), keep it full width.
-                        if (originalSpan == originalSpanCount) {
-                            return columns
+            } catch (e: Exception) {
+                loge("CascadeGrid Error: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun fixAdapter(recyclerView: Any, columns: Int) {
+        try {
+            val adapter = callMethod(recyclerView, "getAdapter")
+            if (adapter == null) {
+                loge("CascadeGrid: Adapter is null")
+                return
+            }
+            logd("CascadeGrid: Hooking Adapter: ${adapter.javaClass.name}")
+
+            adapter.javaClass.hook("onBindViewHolder", HookStage.AFTER) { param ->
+                try {
+                    // Args: holder, position. Using generic Any for safety.
+                    val holder = param.arg<Any>(0)
+                    val position = param.arg<Int>(1)
+                    val itemView = getObjectField(holder, "itemView") as View
+
+                    if (isProfileItem(itemView)) {
+                        val displayMetrics = GrindrPlus.context.resources.displayMetrics
+                        val targetSize = displayMetrics.widthPixels / columns
+
+                        // A. Force Square Layout
+                        val lp = itemView.layoutParams
+                        if (lp != null) {
+                            // We assume it has width/height fields (standard ViewGroup.LayoutParams)
+                            lp.width = targetSize
+                            lp.height = targetSize
+                            itemView.layoutParams = lp
                         }
 
-                        // Otherwise, it's likely a profile tile, so it takes 1 slot.
-                        return 1
+                        // B. Fix Distortion (CENTER_CROP)
+                        val imageId = Utils.getId("profile_image", "id", GrindrPlus.context)
+                        val imageView = itemView.findViewById<ImageView>(imageId)
+                        if (imageView != null) {
+                            imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+                        }
+
+                        // C. Unlimited Profiles Click Fix
+                        try {
+                            val item = callMethod(adapter, "getItem", position)
+                            val profileId = extractProfileId(item)
+                            if (profileId != null) {
+                                itemView.setOnClickListener {
+                                    openProfile(profileId)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore header items causing getItem errors
+                        }
                     }
-                }
-
-                val adapter = recyclerView.adapter ?: return@hook
-
-                // Hook onBind to enforce square sizing (fixes distortion)
-                adapter::class.java.hook("onBindViewHolder", HookStage.AFTER) { param ->
-                    val holder = param.arg<RecyclerView.ViewHolder>(0)
-                    val itemView = holder.itemView
-
-                    // Only resize if it's a grid item (Profile)
-                    // We can check layout params or view type
-                    val lp = itemView.layoutParams
-                    if (lp is GridLayoutManager.LayoutParams) {
-                        // If it's set to span full width, don't force square height
-                        if (lp.spanSize == columns) return@hook
-
-                        val displayMetrics = GrindrPlus.context.resources.displayMetrics
-                        val size = displayMetrics.widthPixels / columns
-
-                        lp.width = size
-                        lp.height = size
-                        itemView.layoutParams = lp
-                    }
+                } catch (e: Exception) {
+                    // Suppress logging spam for every item
                 }
             }
+        } catch (e: Exception) {
+            loge("CascadeGrid: Failed to hook adapter: ${e.message}")
+        }
+    }
+
+    private fun isProfileItem(itemView: View): Boolean {
+        val hasProfileImage = itemView.findViewById<View>(Utils.getId("profile_image", "id", GrindrPlus.context)) != null
+        return hasProfileImage
+    }
+
+    private fun extractProfileId(obj: Any?): String? {
+        if (obj == null) return null
+        return try {
+            getObjectField(obj, "profileId")?.toString()
+        } catch (e: Exception) {
+            try {
+                getObjectField(obj, "profileIdLong")?.toString()
+            } catch (e2: Exception) { null }
+        }
     }
 }

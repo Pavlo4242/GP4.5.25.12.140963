@@ -3,16 +3,15 @@ package com.grindrplus.hooks
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.children
 import androidx.core.view.isGone
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.grindrplus.GrindrPlus
 import com.grindrplus.core.Config
+import com.grindrplus.core.logd
+import com.grindrplus.core.loge
 import com.grindrplus.ui.Utils
 import com.grindrplus.utils.Hook
 import com.grindrplus.utils.HookStage
@@ -28,125 +27,99 @@ class Favorites : Hook(
     private val favoritesFragment = "com.grindrapp.android.favorites.presentation.ui.FavoritesFragment"
 
     override fun init() {
-        findClass(favoritesFragment)
-            .hook("onViewCreated", HookStage.AFTER) { param ->
+        findClass(favoritesFragment).hook("onViewCreated", HookStage.AFTER) { param ->
+            try {
+                logd("Favorites: onViewCreated hooked")
                 val columnsNumber = (Config.get("favorites_grid_columns", 3) as Number).toInt()
                 val view = param.arg<View>(0)
 
-                // 1. Find RecyclerView
-                val recyclerView = view.findViewById<RecyclerView>(
-                    Utils.getId(
-                        "fragment_favorite_recycler_view",
-                        "id", GrindrPlus.context
-                    )
-                ) ?: return@hook
+                // 1. Find RecyclerView via Reflection safe ID check
+                val recyclerId = Utils.getId("fragment_favorite_recycler_view", "id", GrindrPlus.context)
+                val recyclerView = view.findViewById<View>(recyclerId)
 
-                // 2. Set Grid Columns
-                val layoutManager = recyclerView.layoutManager
-                if (layoutManager is GridLayoutManager) {
-                    layoutManager.spanCount = columnsNumber
-                } else {
-                    // Fallback for older versions where manager might need reflection
-                    callMethod(layoutManager, "setSpanCount", columnsNumber)
+                if (recyclerView == null) {
+                    loge("Favorites: RecyclerView not found")
+                    return@hook
                 }
 
-                val adapter = recyclerView.adapter ?: return@hook
+                // 2. Set Grid Columns via Reflection
+                val layoutManager = callMethod(recyclerView, "getLayoutManager")
+                if (layoutManager != null && layoutManager.javaClass.name.contains("GridLayoutManager")) {
+                    logd("Favorites: Setting span count to $columnsNumber")
+                    callMethod(layoutManager, "setSpanCount", columnsNumber)
+                } else {
+                    loge("Favorites: LayoutManager is not GridLayoutManager")
+                }
 
-                // 3. Hook Adapter to Fix Layout & Status
-                adapter::class.java
-                    .hook("onBindViewHolder", HookStage.AFTER) { param ->
-                        val holder = param.arg<RecyclerView.ViewHolder>(0)
-                        val itemView = holder.itemView
+                // 3. Hook Adapter
+                val adapter = callMethod(recyclerView, "getAdapter") ?: return@hook
 
-                        // --- PART 1: FIX DISTORTION (Make it Square) ---
-                        val displayMetrics = GrindrPlus.context.resources.displayMetrics
-                        val size = displayMetrics.widthPixels / columnsNumber
+                adapter.javaClass.hook("onBindViewHolder", HookStage.AFTER) { bindParam ->
+                    val holder = bindParam.arg<Any>(0)
+                    val itemView = getObjectField(holder, "itemView") as View
 
-                        // Get or Create LayoutParams
-                        val rootLayoutParams = if (itemView.layoutParams is ViewGroup.MarginLayoutParams) {
-                            itemView.layoutParams as ViewGroup.MarginLayoutParams
-                        } else {
-                            ViewGroup.MarginLayoutParams(size, size)
-                        }
+                    if (isProfileItem(itemView)) {
+                        fixLayout(itemView, columnsNumber)
+                        applyTextStyling(itemView)
+                        fixLastSeenMargins(itemView)
 
-                        // FORCE SQUARE DIMENSIONS
-                        rootLayoutParams.width = size
-                        rootLayoutParams.height = size
-                        // Reset margins to ensure tight grid packing
-                        rootLayoutParams.setMargins(0,0,0,0)
-
-                        itemView.layoutParams = rootLayoutParams
-
-                        // --- PART 2: ORIGINAL STYLING (Stack Text Vertically) ---
-                        val distanceTextView = itemView.findViewById<TextView>(
-                            Utils.getId("profile_distance", "id", GrindrPlus.context)
-                        )
-
-                        // Only manipulate if we found the view (safety check)
-                        if (distanceTextView != null) {
-                            val linearLayout = distanceTextView.parent as? LinearLayout
-                            if (linearLayout != null) {
-                                linearLayout.orientation = LinearLayout.VERTICAL
-                                linearLayout.children.forEach { child ->
-                                    child.layoutParams = LinearLayout.LayoutParams(
-                                        LinearLayout.LayoutParams.MATCH_PARENT,
-                                        LinearLayout.LayoutParams.WRAP_CONTENT
-                                    )
-                                }
-                            }
-                            distanceTextView.gravity = Gravity.START
-                        }
-
-                        // --- PART 3: MARGIN FIXES (From Original Code) ---
-                        val profileOnlineNowIcon = itemView.findViewById<ImageView>(
-                            Utils.getId("profile_online_now_icon", "id", GrindrPlus.context)
-                        )
-                        val profileLastSeen = itemView.findViewById<TextView>(
-                            Utils.getId("profile_last_seen", "id", GrindrPlus.context)
-                        )
-
-                        if (profileLastSeen != null && profileOnlineNowIcon != null) {
-                            val lastSeenLayoutParams = profileLastSeen.layoutParams as? LinearLayout.LayoutParams
-                            if (lastSeenLayoutParams != null) {
-                                if (profileOnlineNowIcon.isGone) {
-                                    lastSeenLayoutParams.topMargin = 0
-                                } else {
-                                    lastSeenLayoutParams.topMargin = TypedValue.applyDimension(
-                                        TypedValue.COMPLEX_UNIT_DIP, 5f, displayMetrics
-                                    ).roundToInt()
-                                }
-                                profileLastSeen.layoutParams = lastSeenLayoutParams
-                            }
-                        }
-
-                        // --- PART 4: ATTEMPT REAL-TIME STATUS CHECK ---
-                        // This attempts to grab the ID and force a check
+                        // Force status refresh attempt
                         try {
-                            // Try to find the data object attached to the holder
-                            // Common field names in Grindr: 'data', 'item', 'profile'
-                            var profileData: Any? = try {
-                                getObjectField(holder, "data")
-                            } catch (e: Exception) { null }
-
-                            // If not in field, sometimes it's in itemView.tag
-                            if (profileData == null) profileData = itemView.tag
-
-                            if (profileData != null && profileOnlineNowIcon != null) {
-                                // Try to find profileId
-                                val pid = (try { getObjectField(profileData, "profileId") } catch(e:Exception){null})
-                                    ?: (try { getObjectField(profileData, "profileIdLong") } catch(e:Exception){null})
-
-                                if (pid != null) {
-                                    // HERE is where you would call the ProfileRepo to check if user is actually online
-                                    // For now, this ensures that if the VIEW thinks it's online, we force it visible
-                                    // This helps if the recycling logic was hiding it erroneously.
-                                    // To implement the "Force Check", we need the ProfileRepo instance (hard to get here without context).
-                                }
-                            }
-                        } catch (e: Throwable) {
-                            // Consume errors so list doesn't crash
-                        }
+                            val data = getObjectField(holder, "data")
+                            getObjectField(data, "profileId")
+                        } catch (e: Exception) {}
                     }
+                }
+            } catch (e: Exception) {
+                loge("Favorites Error: ${e.message}")
             }
+        }
+    }
+
+    private fun fixLayout(itemView: View, columns: Int) {
+        val displayMetrics = GrindrPlus.context.resources.displayMetrics
+        val targetSize = displayMetrics.widthPixels / columns
+
+        val lp = itemView.layoutParams
+        if (lp != null) {
+            lp.width = targetSize
+            lp.height = targetSize
+            // reflection to set margins if needed, but width/height is main priority
+            itemView.layoutParams = lp
+        }
+
+        val imageId = Utils.getId("profile_image", "id", GrindrPlus.context)
+        val imageView = itemView.findViewById<ImageView>(imageId)
+        imageView?.scaleType = ImageView.ScaleType.CENTER_CROP
+    }
+
+    private fun isProfileItem(itemView: View): Boolean {
+        val hasImage = itemView.findViewById<View>(Utils.getId("profile_image", "id", GrindrPlus.context)) != null
+        val hasName = itemView.findViewById<View>(Utils.getId("display_name", "id", GrindrPlus.context)) != null
+        return hasImage && hasName
+    }
+
+    private fun applyTextStyling(itemView: View) {
+        val distanceTextView = itemView.findViewById<TextView>(Utils.getId("profile_distance", "id", GrindrPlus.context)) ?: return
+        val linearLayout = distanceTextView.parent as? LinearLayout
+        if (linearLayout != null) {
+            linearLayout.orientation = LinearLayout.VERTICAL
+            linearLayout.children.forEach { child ->
+                child.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+        }
+        distanceTextView.gravity = Gravity.START
+    }
+
+    private fun fixLastSeenMargins(itemView: View) {
+        val profileOnlineNowIcon = itemView.findViewById<ImageView>(Utils.getId("profile_online_now_icon", "id", GrindrPlus.context))
+        val profileLastSeen = itemView.findViewById<TextView>(Utils.getId("profile_last_seen", "id", GrindrPlus.context))
+        if (profileLastSeen != null && profileOnlineNowIcon != null) {
+            val lp = profileLastSeen.layoutParams as? LinearLayout.LayoutParams
+            if (lp != null) {
+                lp.topMargin = if (profileOnlineNowIcon.isGone) 0 else TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 5f, GrindrPlus.context.resources.displayMetrics).roundToInt()
+                profileLastSeen.layoutParams = lp
+            }
+        }
     }
 }
