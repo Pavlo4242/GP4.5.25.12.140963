@@ -30,6 +30,12 @@ android {
             useSupportLibrary = true
         }
 
+        configurations {
+            all {
+                exclude(group = "com.google.code.findbugs", module = "jsr305")
+            }
+        }
+
         buildConfigField(
             "String[]",
             "TARGET_GRINDR_VERSION_NAMES",
@@ -171,6 +177,10 @@ tasks.register("setupLSPatch") {
             commandLine = listOf("zip", "-d", "./libs/lspatch.jar", "com/google/common/util/concurrent/ListenableFuture.class")
         }
 
+        // Removes javax.annotation duplicates (jsr305)
+        exec {
+            commandLine = listOf("zip", "-d", "./libs/lspatch.jar", "javax/annotation/*")
+        }
         exec {
             commandLine = listOf("zip", "-d", "./libs/lspatch.jar", "com/google/errorprone/annotations/*")
         }
