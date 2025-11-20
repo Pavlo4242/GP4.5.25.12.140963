@@ -1,6 +1,7 @@
 package com.grindrplus
 
 import android.app.Application
+import com.facebook.stetho.Stetho
 import com.grindrplus.core.Constants.GRINDR_PACKAGE_NAME
 import com.grindrplus.hooks.spoofSignatures
 import com.grindrplus.hooks.sslUnpinning
@@ -22,14 +23,30 @@ class XposedLoader : IXposedHookZygoteInit, IXposedHookLoadPackage {
 
         spoofSignatures(lpparam)
         //if (BuildConfig.DEBUG) {
-            sslUnpinning(lpparam)
+        sslUnpinning(lpparam)
         //}
 
         Application::class.java.hook("attach", HookStage.AFTER) {
             val application = it.thisObject()
-            GrindrPlus.init(modulePath, application,
+            GrindrPlus.init(
+                modulePath, application,
                 BuildConfig.TARGET_GRINDR_VERSION_CODES,
-                BuildConfig.TARGET_GRINDR_VERSION_NAMES)
+                BuildConfig.TARGET_GRINDR_VERSION_NAMES
+            )
+
+            // --- INITIALIZE STETHO HERE ---
+            try {
+                Stetho.initializeWithDefaults(application)
+                com.grindrplus.core.Logger.i(
+                    "Stetho Initialized! Open chrome://inspect",
+
+                )
+            } catch (e: Exception) {
+                com.grindrplus.core.Logger.e(
+                    "Failed to init Stetho: ${e.message}",
+
+                )
+            }
         }
     }
 }

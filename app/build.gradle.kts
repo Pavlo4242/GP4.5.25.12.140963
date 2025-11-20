@@ -132,8 +132,11 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.arsclib)
     compileOnly(libs.bcprov.jdk18on)
-}
 
+    // Use the version catalog references instead of hardcoded strings
+    implementation(libs.stetho)
+    implementation(libs.stetho.okhttp3) // For network inspection/ For network inspection
+}
 tasks.register("setupLSPatch") {
     doLast {
         val jarUrl =

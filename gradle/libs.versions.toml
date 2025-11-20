@@ -26,8 +26,12 @@ runtimeAndroid = "1.7.8"
 timber = "5.0.1"
 zipalignJava = "1.2.1"
 zipAndroid = "2.2.0"
-
+stetho = "1.6.0"
 [libraries]
+
+# Add Stetho libraries
+stetho = { group = "com.facebook.stetho", name = "stetho", version.ref = "stetho" }
+stetho-okhttp3 = { group = "com.facebook.stetho", name = "stetho-okhttp3", version.ref = "stetho" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
